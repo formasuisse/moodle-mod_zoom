@@ -50,8 +50,8 @@ $event->trigger();
 // Print the page header.
 
 $PAGE->set_url('/mod/zoom/view.php', ['id' => $cm->id]);
-$PAGE->set_title(format_string($zoom->name));
-$PAGE->set_heading(format_string($course->fullname));
+$PAGE->set_title(format_string($zoom->name, true, ['context' => $context]));
+$PAGE->set_heading(format_string($course->fullname, true, ['context' => $context]));
 $PAGE->requires->js_call_amd("mod_zoom/toggle_text", 'init');
 
 // Get Zoom user ID of current Moodle user.
@@ -127,7 +127,7 @@ $strmeetinginviteshow = get_string('meeting_invite_show', 'mod_zoom');
 echo $OUTPUT->header();
 
 if ($CFG->branch < '400') {
-    echo $OUTPUT->heading(format_string($zoom->name), 2);
+    echo $OUTPUT->heading(format_string($zoom->name, true, ['context' => $context]), 2);
 }
 
 // Show notification if the meeting does not exist on Zoom.
@@ -591,7 +591,7 @@ if ($zoom->show_media) {
         $meetinginvite = zoom_webservice()->get_meeting_invitation($zoom)->get_display_string($cm->id);
         // Show meeting invitation if there is any.
         if (!empty($meetinginvite)) {
-            $meetinginvitetext = str_replace("\r\n", '<br/>', $meetinginvite);
+            $meetinginvitetext = str_replace("\r\n", '<br/>', s($meetinginvite));
             $showbutton = html_writer::tag(
                 'button',
                 $strmeetinginviteshow,

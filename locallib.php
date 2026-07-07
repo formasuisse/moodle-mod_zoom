@@ -143,7 +143,7 @@ function zoom_fatal_error($errorcode, $module = '', $continuelink = '', $a = nul
         throw new moodle_exception($errorcode, $module, $continuelink, $a);
     }
 
-    $PAGE->set_heading($COURSE->fullname);
+    $PAGE->set_heading(format_string($COURSE->fullname));
     $output .= $OUTPUT->header();
 
     // Output message without messing with HTML content of error.
