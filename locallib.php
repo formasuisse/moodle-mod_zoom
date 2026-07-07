@@ -270,7 +270,7 @@ function zoom_get_sessions_for_display($zoomid) {
         $sessions[$uuid]['topic'] = $instance->topic;
         $sessions[$uuid]['duration'] = $instance->duration;
         $sessions[$uuid]['starttime'] = userdate($instance->start_time, $format);
-        $sessions[$uuid]['endtime'] = userdate($instance->start_time + $instance->duration * 60, $format);
+        $sessions[$uuid]['endtime'] = userdate($instance->start_time + $instance->duration, $format);
     }
 
     return $sessions;
