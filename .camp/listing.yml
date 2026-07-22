@@ -1,0 +1,21 @@
+# camp listing manifest — descriptive content for your plugin's page.
+# Edit freely and commit; camp ingests this file at each tagged release.
+# Schema: https://camp-registry.org/schema/listing.schema.json
+name: mod_zoom
+summary: Activity module that integrates with Zoom meetings/webinars.
+description: |
+  The Zoom activity module allows teachers to create and manage Zoom meetings
+  and webinars directly within Moodle. Students can join meetings, view recordings,
+  and see meeting schedules without leaving the course.
+labels:
+  # Required disclosure labels — pick all that apply (RFC §4.7):
+  #   fully-free | freemium | paid-service | external-account
+  #   donation-supported | commercial-support-available
+  - external-account
+# screenshots:
+#   - path: .camp/screenshots/overview.png
+#     caption: Main view
+links:
+    docs: https://github.com/jrchamp/moodle-mod_zoom/wiki/Adding-a-New-Zoom-Meeting-Activity
+    issues: https://github.com/jrchamp/moodle-mod_zoom/issues
+    changelog: https://github.com/jrchamp/moodle-mod_zoom/releases
