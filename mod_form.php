@@ -65,6 +65,19 @@ class mod_zoom_mod_form extends moodleform_mod {
 
         $zoomuserid = zoom_get_user_id(false);
 
+        // Pooled-hosts feature: in pooled mode the creator needs no Zoom
+        // identity — the host is picked from the pool at save time. The form
+        // still needs SOME Zoom user to read recording/security defaults from
+        // before a host exists, so any pool member serves as surrogate; the
+        // first is as good as any (pool members are interchangeable by
+        // definition) and is never persisted — lib.php overrides host_id with
+        // the slot picker's choice on save.
+        $pooled = (zoom_pooled_group() !== null);
+        if ($pooled && $isnew) {
+            $poolmembers = zoom_pooled_members($this->context);
+            $zoomuserid = $poolmembers[0]->id;
+        }
+
         // If creating a new instance, but the Zoom user does not exist.
         if ($isnew && $zoomuserid === false) {
             // Assume user is using Zoom for the first time.
@@ -79,8 +92,10 @@ class mod_zoom_mod_form extends moodleform_mod {
         $scheduleusers = [];
 
         $canschedule = false;
-        if ($zoomuserid !== false) {
+        if (!$pooled && $zoomuserid !== false) {
             // Get the array of users they can schedule.
+            // (Pooled-hosts feature: scheduling privilege is
+            // meaningless in pooled mode — the host is picked automatically.)
             $canschedule = zoom_webservice()->get_schedule_for_users($zoomuserid);
         }
 
@@ -178,6 +193,56 @@ class mod_zoom_mod_form extends moodleform_mod {
         // Add description 'intro' and 'introformat'.
         $this->standard_intro_elements();
 
+        // Pooled-hosts feature: the teacher (who gets the Start button) is
+        // plugin data on the activity, decoupled from the Zoom host. Candidates
+        // are enrolled users holding one of the role archetypes configured in
+        // zoom/pooledteacherroles (default editingteacher,teacher; empty = no
+        // filter). Archetypes rather than role names: site-agnostic.
+        if ($pooled) {
+            $rolesconfig = get_config('zoom', 'pooledteacherroles');
+            $archetypes = array_filter(array_map('trim',
+                explode(',', $rolesconfig === false ? 'editingteacher,teacher' : (string) $rolesconfig)));
+            $teacherroleids = [];
+            foreach ($archetypes as $archetype) {
+                $teacherroleids += get_archetype_roles($archetype);
+            }
+
+            $enrolled = get_enrolled_users($this->context, 'mod/zoom:addinstance', 0, 'u.*', 'lastname');
+            $teachers = [];
+            foreach ($enrolled as $teacheruser) {
+                if (!empty($archetypes)) {
+                    $isteacher = false;
+                    foreach (get_user_roles($this->context, $teacheruser->id) as $role) {
+                        if (isset($teacherroleids[$role->roleid])) {
+                            $isteacher = true;
+                            break;
+                        }
+                    }
+
+                    if (!$isteacher) {
+                        continue;
+                    }
+                }
+
+                $teachers[$teacheruser->id] = fullname($teacheruser);
+            }
+
+            // A course without matching role holders still needs the dropdown.
+            if (empty($teachers)) {
+                foreach ($enrolled as $teacheruser) {
+                    $teachers[$teacheruser->id] = fullname($teacheruser);
+                }
+            }
+
+            $mform->addElement('select', 'teacherid', get_string('teacher', 'mod_zoom'), $teachers);
+            $mform->setType('teacherid', PARAM_INT);
+            $mform->addRule('teacherid', null, 'required', null, 'client');
+            $mform->addHelpButton('teacherid', 'teacher', 'mod_zoom');
+            if ($isnew && isset($teachers[$USER->id])) {
+                $mform->setDefault('teacherid', $USER->id);
+            }
+        }
+
         // Adding the "schedule" fieldset, where all settings relating to date and time are shown.
         $mform->addElement('header', 'schedule', get_string('schedule', 'mod_zoom'));
         $mform->setExpanded('schedule');
@@ -195,6 +260,13 @@ class mod_zoom_mod_form extends moodleform_mod {
         $mform->addElement('duration', 'duration', get_string('duration', 'zoom'), ['optional' => false]);
         // Validation in validation(). Default to one hour.
         $mform->setDefault('duration', ['number' => 1, 'timeunit' => 3600]);
+        // Pooled-hosts feature: the slot picker and the end-of-session task
+        // need a real duration — mark it required in the form (asterisk +
+        // client-side check; the recurring-no-fixed-time case hides the field
+        // via JS, and disabled/hidden fields skip the required rule).
+        if (zoom_pooled_group() !== null) {
+            $mform->addRule('duration', get_string('err_duration_nonpositive', 'zoom'), 'required', null, 'client');
+        }
         // Duration needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
         // Moved this control to javascript, rather than using disabledIf.
 
@@ -403,7 +475,8 @@ class mod_zoom_mod_form extends moodleform_mod {
         // Add registration widget.
         $registrationoptions = [
             ZOOM_REGISTRATION_OFF => get_string('no'),
-            ZOOM_REGISTRATION_AUTOMATIC => get_string('registration_text', 'mod_zoom'),
+            ZOOM_REGISTRATION_AUTOMATIC => get_string('registration_automoodle', 'mod_zoom'),
+            ZOOM_REGISTRATION_MANUAL => get_string('registration_self', 'mod_zoom'),
         ];
         $mform->addElement('select', 'registration', get_string('registration', 'mod_zoom'), $registrationoptions);
         $mform->setDefault('registration', $config->defaultregistration);
@@ -1057,6 +1130,12 @@ class mod_zoom_mod_form extends moodleform_mod {
                 $errors['start_time'] = get_string('err_start_time_past', 'zoom');
             }
 
+            // Pooled-hosts feature: the slot picker and the end-of-session
+            // task both need a real duration — enforce it.
+            if (zoom_pooled_group() !== null && empty($data['duration'])) {
+                $errors['duration'] = get_string('err_duration_nonpositive', 'zoom');
+            }
+
             // Make sure duration is positive and no more than 150 hours.
             if ($data['duration'] <= 0) {
                 $errors['duration'] = get_string('err_duration_nonpositive', 'zoom');
@@ -1182,7 +1261,28 @@ class mod_zoom_mod_form extends moodleform_mod {
         if ($data['registration'] != ZOOM_REGISTRATION_OFF) {
             // Recurring meeting validation already handled by hiding registration option where required.
             // Check licensing of the user.
-            if (!zoom_webservice()->is_user_permitted_to_require_registration()) {
+            // Pooled-hosts feature: the creator's own Zoom identity is
+            // irrelevant — the meeting is hosted by a pool member. What must
+            // hold instead: at least one pool member is Licensed (registration
+            // is a licensed-host feature; the picker restricts registration
+            // meetings to licensed hosts accordingly).
+            if (zoom_pooled_group() !== null) {
+                try {
+                    $haslicensed = false;
+                    foreach (zoom_pooled_members($this->context) as $member) {
+                        if (($member->type ?? ZOOM_USER_TYPE_BASIC) != ZOOM_USER_TYPE_BASIC) {
+                            $haslicensed = true;
+                            break;
+                        }
+                    }
+
+                    if (!$haslicensed) {
+                        $errors['registration'] = get_string('err_registration', 'mod_zoom');
+                    }
+                } catch (moodle_exception $error) {
+                    $errors['registration'] = $error->getMessage();
+                }
+            } else if (!zoom_webservice()->is_user_permitted_to_require_registration()) {
                 $errors['registration'] = get_string('err_registration', 'mod_zoom');
             }
         }

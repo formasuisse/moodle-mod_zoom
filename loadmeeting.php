@@ -29,6 +29,10 @@ require_login();
 
 // Course_module ID.
 $id = required_param('id', PARAM_INT);
+// Browser-join feature: set by the "Join from browser" button on the
+// activity page (view.php) — joins via the Zoom web client instead of the
+// app launcher, preserving the personal registrant token.
+$browser = optional_param('browser', 0, PARAM_BOOL);
 if ($id) {
     $context = context_module::instance($id);
     $PAGE->set_context($context);
@@ -39,6 +43,10 @@ if ($id) {
     // Redirect if available, otherwise deny access.
     if ($meetinginfo['nexturl']) {
         redirect($meetinginfo['nexturl']);
+    } else if (!empty($meetinginfo['notification'])) {
+        // Registered ahead of the session (RSVP) — positive confirmation.
+        redirect(new moodle_url('/mod/zoom/view.php', ['id' => $id]),
+            $meetinginfo['notification'], null, \core\output\notification::NOTIFY_SUCCESS);
     } else {
         // Get redirect URL.
         $unavailabilityurl = new moodle_url('/mod/zoom/view.php', ['id' => $id]);
