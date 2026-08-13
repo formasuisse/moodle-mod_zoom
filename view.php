@@ -58,7 +58,13 @@ $PAGE->requires->js_call_amd("mod_zoom/toggle_text", 'init');
 $zoomuserid = zoom_get_user_id(false);
 
 // Check if this user is the (real) host.
-$userisrealhost = ($zoomuserid === $zoom->host_id);
+// Pooled-hosts feature (see README.md, 'Pooled hosts mode'): in
+// pooled mode the activity's teacher field decides hosting, not Zoom identity.
+if (zoom_pooled_group() !== null) {
+    $userisrealhost = (!empty($zoom->teacherid) && $zoom->teacherid == $USER->id);
+} else {
+    $userisrealhost = ($zoomuserid === $zoom->host_id);
+}
 
 // Get the alternative hosts of the meeting.
 $alternativehosts = zoom_get_alternative_host_array_from_string($zoom->alternative_hosts);
@@ -220,13 +226,13 @@ if (!$showrecreate) {
     }
 
     if ($available) {
-        // Show join meeting button.
-        $btntext = $strjoin;
-
-        // If user is not already registered, use register text.
-        if ($zoom->registration != ZOOM_REGISTRATION_OFF && !$userisregistered) {
-            $btntext = $strregister;
-        }
+        // "Registered" = the user already has a Zoom registrant entry (and thus
+        // a personal tk join link) for this meeting. With auto-registration the
+        // first Join click registers them server-side with their Moodle
+        // identity, so the button reads Join either way; the Register label
+        // only remains for the manual-approval fallback.
+        $userneedsregistration = ($zoom->registration != ZOOM_REGISTRATION_OFF && !$userisregistered);
+        $btntext = ($userneedsregistration && $zoom->registration == ZOOM_REGISTRATION_MANUAL) ? $strregister : $strjoin;
 
         $buttonhtml = html_writer::tag('button', $btntext, ['type' => 'submit', 'class' => 'btn btn-primary']);
 

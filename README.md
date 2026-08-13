@@ -110,3 +110,73 @@ Optional functionality can be enabled by granting additional scopes:
 
 If you get "Access token is expired" errors, make sure the date/time on your
 server is properly synchronized with the time servers.
+
+## Pooled hosts mode
+
+An opt-in operating mode for institutions whose teachers are external
+freelancers without organisational Zoom identities: the Zoom host becomes
+infrastructure — a pool of generic, permanently-Licensed users defined by a
+Zoom group — while the teacher is plain activity data. Licenses never move
+between users (Zoom caps license reassignments at roughly 4 moves per license
+per month, so seat-shuffling designs throttle), and no per-teacher Zoom
+onboarding exists at all.
+
+Enable by setting `zoom/pooledhostsgroup`; leave empty for stock behavior.
+
+| Setting | Meaning |
+|---|---|
+| `zoom/pooledhostsgroup` | Zoom group defining the host pool. Non-empty = pooled mode on; empty = stock upstream behavior. A missing/unreadable group, or one with no usable members after filtering, fails loudly (`pool_misconfigured`) — never a silent empty pool. |
+| `zoom/pooledrequirelicense` | Default on: only Licensed pool members may host (a Basic host's registration-bearing writes are silently stripped by Zoom). |
+| `zoom/slotbuffer` | Minutes of required gap between bookings on one pool host; default 15. |
+| `zoom/hostfirstnametemplate` / `zoom/hostlastnametemplate` | Defaults `%first` / `%last` (placeholders from the teacher's Moodle name). Non-empty = the pool host is renamed to the teacher's name at start and restored after the session (compare-and-swap: an out-of-band rename is never overwritten). Empty both = no rename. |
+| `zoom/pooledteacherroles` | Comma-separated role archetypes whose holders appear in the Teacher selector; default `editingteacher,teacher`. Empty = every enrolled user who can add Zoom activities. |
+| `zoom/registrantconfirmationemail` | Default off: Zoom's own registration confirmation email is suppressed — the LMS hands out the personal join link itself. |
+
+How it works:
+
+- **Scheduling**: the activity form gains a required Teacher selector (role
+  archetypes per `pooledteacherroles`). On save, the plugin picks a pool
+  member whose Zoom calendar (including meetings scheduled outside Moodle) is
+  free for the slot ± buffer; the scan starts at a position hashed from the
+  teacher so the same teacher tends to stay on the same pool host. No free
+  host = the save fails (`pool_exhausted`) — that is the capacity signal.
+  Duration is mandatory for scheduled meetings in pooled mode.
+- **Starting**: only the selected teacher sees Start. The click live-checks
+  the pool host (`collision_imminent` if it is still in another meeting —
+  Zoom allows only one active meeting per host and ends the first when a
+  second is started), applies the name templates, queues the end-of-session
+  adhoc task, and redirects through a fresh ZAK start URL.
+- **After the session**: the adhoc task (scheduled_end + buffer, re-queuing
+  while the meeting is still live, `overrun_detected` when a next booking
+  approaches) restores the pool host's original profile name so manually
+  scheduled meetings on the same account never run under a teacher's name.
+- **Server-side registration, two modes**: registrants are always created by
+  the plugin from the user's Moodle identity (name and email) — nobody ever
+  sees Zoom's registration form, and the enforced display name is the Moodle
+  name by construction. In *automatic* mode this happens invisibly on the
+  first Join click; in *manual* (RSVP) mode the button reads Register and the
+  explicit click is the participant's attendance confirmation — registering
+  ahead of the session shows a confirmation, and the Join button appears when
+  the session window opens. Zoom's own form remains only as an API-failure
+  fallback.
+- **Attendance**: the participant row matching the pool host is force-mapped
+  to the activity's teacher; students match via their registration email as
+  usual.
+- **Alerting**: the mode fires plain Moodle events (`pool_exhausted`,
+  `pool_misconfigured`, `collision_imminent`, `overrun_detected`,
+  `registration_dropped`) which land in the standard log store; routing
+  (Slack, email, …) is left to observer plugins.
+
+Independent of pooled mode, this fork also always verifies meeting writes by
+reading them back (Zoom answers 2xx and silently drops entitlement-gated
+settings).
+
+## Fork status
+
+Branch `pooled`, based on upstream release tag **v5.5.0** (`2f1e5a8`),
+maintained by FormaSuisse (`formasuisse/formasuisse_infra` consumes it at a
+pinned commit SHA). Rebase policy: manual, onto upstream release tags. Design
+notes and the measured evidence behind the mode (test labels T0–T14 in code
+comments) live in the infra repo, issue formasuisse_infra#783. The earlier
+shadow-user / license-stealing variant is preserved on the `formasuisse`
+branch.

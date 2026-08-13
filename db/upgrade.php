@@ -1024,5 +1024,23 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2025050900, 'zoom');
     }
 
+    if ($oldversion < 2026081300) {
+        // Pooled-hosts feature: teacher + rename-stash columns on zoom.
+        $table = new xmldb_table('zoom');
+
+        $field = new xmldb_field('teacherid', XMLDB_TYPE_INTEGER, '10', null, null, null, null, 'registration');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('poolrename', XMLDB_TYPE_TEXT, null, null, null, null, null, 'teacherid');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Zoom savepoint reached.
+        upgrade_mod_savepoint(true, 2026081300, 'zoom');
+    }
+
     return true;
 }
