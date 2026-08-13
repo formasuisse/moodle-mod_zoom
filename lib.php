@@ -98,6 +98,15 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
         $zoom->breakoutrooms = $breakoutrooms['zoom'];
     }
 
+    // Pooled-hosts feature (see README.md, 'Pooled hosts mode'): the
+    // host is picked from the pool by slot availability, not derived from the
+    // creator's Zoom identity. Fails loudly when no pool host is free.
+    if (zoom_pooled_group() !== null) {
+        $pooledcontext = !empty($zoom->coursemodule) ? context_module::instance($zoom->coursemodule) : null;
+        $zoom->host_id = zoom_pooled_pick_host($zoom, $pooledcontext);
+        unset($zoom->schedule_for);
+    }
+
     $response = zoom_webservice()->create_meeting($zoom, $zoom->coursemodule);
     $zoom = populate_zoom_from_response($zoom, $response);
     $zoom->timemodified = time();
@@ -183,6 +192,18 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
     $updatedzoomrecord = $DB->get_record('zoom', ['id' => $zoom->id]);
     $zoom->meeting_id = $updatedzoomrecord->meeting_id;
     $zoom->webinar = $updatedzoomrecord->webinar;
+
+    // Pooled-hosts feature: revalidate the (kept) pool host's slot on
+    // reschedule — Zoom accepts overlapping schedules, this is the only guard.
+    if (zoom_pooled_group() !== null) {
+        unset($zoom->schedule_for);
+        if (
+            !empty($zoom->start_time)
+            && zoom_pooled_slot_conflicts($zoom->host_id, $zoom->start_time, $zoom->duration ?? HOURSECS, $zoom->meeting_id)
+        ) {
+            throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+        }
+    }
 
     // Update meeting on Zoom.
     try {

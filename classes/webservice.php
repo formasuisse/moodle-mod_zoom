@@ -523,6 +523,98 @@ class webservice {
     }
 
     /**
+     * Resolve a Zoom group ID by its name (case-insensitive).
+     *
+     * Pooled-hosts feature (see README.md, 'Pooled hosts mode').
+     *
+     * @param string $name The group name.
+     * @return string|false The group ID, or false when no such group is visible.
+     */
+    public function get_group_id_by_name($name) {
+        foreach ($this->get_groups() as $group) {
+            if (strcasecmp($group->name ?? '', $name) === 0) {
+                return $group->id;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get the members of a Zoom group.
+     *
+     * Pooled-hosts feature. The member payload carries id, email, name and
+     * license type directly (measured, T13).
+     *
+     * @param string $groupid The Zoom group ID.
+     * @return array Member objects.
+     */
+    public function get_group_members($groupid) {
+        // Classic: group:read:admin.
+        // Granular: group:read:list_members:admin.
+        return $this->make_paginated_call("groups/$groupid/members", [], 'members');
+    }
+
+    /**
+     * Get a user's upcoming meetings (includes meetings scheduled outside Moodle).
+     *
+     * Pooled-hosts feature: the slot-availability picker's data source. The
+     * optional from/to dates (Y-m-d) narrow the listing server-side to the
+     * days around the slot being checked.
+     *
+     * @param string $zoomuserid The Zoom user ID.
+     * @param ?string $from Start date (Y-m-d), inclusive.
+     * @param ?string $to End date (Y-m-d), inclusive.
+     * @return array Meeting objects (id, start_time, duration, type, ...).
+     */
+    public function get_user_upcoming_meetings($zoomuserid, $from = null, $to = null) {
+        // Classic: meeting:read:admin.
+        // Granular: meeting:read:list_meetings:admin.
+        $params = ['type' => 'upcoming'];
+        if ($from !== null) {
+            $params['from'] = $from;
+        }
+
+        if ($to !== null) {
+            $params['to'] = $to;
+        }
+
+        return $this->make_paginated_call("users/$zoomuserid/meetings", $params, 'meetings');
+    }
+
+    /**
+     * Get a user's currently live meetings.
+     *
+     * Pooled-hosts feature: the only trustworthy liveness signal
+     * (last_login_time is blind to ZAK starts — T4).
+     *
+     * @param string $zoomuserid The Zoom user ID.
+     * @return array Meeting objects.
+     */
+    public function get_user_live_meetings($zoomuserid) {
+        // Classic: meeting:read:admin.
+        // Granular: meeting:read:list_meetings:admin.
+        return $this->make_paginated_call("users/$zoomuserid/meetings", ['type' => 'live'], 'meetings');
+    }
+
+    /**
+     * Update a Zoom user's display name.
+     *
+     * Pooled-hosts feature: applies/restores the hostnametemplate
+     * rename around a pooled session.
+     *
+     * @param string $zoomuserid The Zoom user ID.
+     * @param string $firstname New first name.
+     * @param string $lastname New last name.
+     * @return void
+     */
+    public function update_user_name($zoomuserid, $firstname, $lastname) {
+        // Classic: user:write:admin.
+        // Granular: user:update:user:admin.
+        $this->make_call("users/$zoomuserid", ['first_name' => $firstname, 'last_name' => $lastname], 'patch');
+    }
+
+    /**
      * Gets a user's settings.
      *
      * @param string $userid The user's ID.
@@ -678,14 +770,31 @@ class webservice {
             $data['settings']['alternative_hosts'] = $zoom->alternative_hosts;
         }
 
-        if (isset($zoom->option_authenticated_users)) {
-            $data['settings']['meeting_authentication'] = (bool) $zoom->option_authenticated_users;
-        }
+        // Fork feature: default meeting_authentication to false explicitly —
+        // an inherited true silently breaks tk-link joins for students without
+        // Zoom accounts (measured, T7).
+        $data['settings']['meeting_authentication'] = isset($zoom->option_authenticated_users)
+            ? (bool) $zoom->option_authenticated_users
+            : false;
 
         if (isset($zoom->registration)) {
-            $data['settings']['approval_type'] = $zoom->registration;
+            // Both Moodle registration modes are auto-approved on the Zoom
+            // side (approval_type 0) — MANUAL means self-registration (RSVP),
+            // not host-approval.
+            $data['settings']['approval_type'] =
+                ($zoom->registration == ZOOM_REGISTRATION_OFF) ? ZOOM_REGISTRATION_OFF : ZOOM_REGISTRATION_AUTOMATIC;
             if ($zoom->registration != ZOOM_REGISTRATION_OFF) {
                 $data['settings']['use_pmi'] = false;
+                // Register once, valid for ALL occurrences of a recurring
+                // series (Zoom default, pinned so it cannot drift): the
+                // auto-created registrant's tk link then covers every session.
+                $data['settings']['registration_type'] = 1;
+                // Whether Zoom sends its own confirmation email to registrants
+                // (zoom/registrantconfirmationemail, default off): when the LMS
+                // hands out the personal join link itself, Zoom's mail is
+                // redundant.
+                $data['settings']['registrants_confirmation_email'] =
+                    (bool) get_config('zoom', 'registrantconfirmationemail');
             }
         }
 
@@ -834,6 +943,9 @@ class webservice {
      * Create a meeting/webinar on Zoom.
      * Take a $zoom object as returned from the Moodle form and respond with an object that can be saved to the database.
      *
+     * Fork feature: registration-bearing creates are read-back-verified
+     * (Zoom silently strips registration on unlicensed writes — measured, T1).
+     *
      * @param stdClass $zoom The meeting to create.
      * @param ?int $cmid The cmid if available.
      * @return stdClass The call response.
@@ -847,11 +959,17 @@ class webservice {
         // Classic: webinar:write:admin.
         // Granular: webinar:write:webinar:admin.
         $url = "users/$zoom->host_id/" . (!empty($zoom->webinar) ? 'webinars' : 'meetings');
-        return $this->make_call($url, $this->database_to_api($zoom, $cmid), 'post');
+        $data = $this->database_to_api($zoom, $cmid);
+        $response = $this->make_call($url, $data, 'post');
+        $this->verify_readback($zoom, $data, $response->id ?? null);
+        return $response;
     }
 
     /**
      * Update a meeting/webinar on Zoom.
+     *
+     * Fork feature: read-back-verified — ANY update under a Basic host
+     * silently strips registration (measured, T3).
      *
      * @param stdClass $zoom The meeting to update.
      * @param ?int $cmid The cmid if available.
@@ -863,7 +981,61 @@ class webservice {
         // Classic: webinar:write:admin.
         // Granular: webinar:update:webinar:admin.
         $url = ($zoom->webinar ? 'webinars/' : 'meetings/') . $zoom->meeting_id;
-        $this->make_call($url, $this->database_to_api($zoom, $cmid), 'patch');
+        $data = $this->database_to_api($zoom, $cmid);
+        $this->make_call($url, $data, 'patch');
+        $this->verify_readback($zoom, $data, $zoom->meeting_id);
+    }
+
+    /**
+     * Verify that a meeting create/update actually persisted on Zoom.
+     *
+     * Zoom answers 2xx and silently drops entitlement-gated settings
+     * (measured: unlicensed host T1/T3, PMI conversion T7) — so after every
+     * write, read the meeting back and fail the Moodle save loudly when what
+     * Zoom stored contradicts what was written. Verified: PMI conversion of a
+     * scheduled meeting (kills per-meeting settings incl. registration),
+     * meeting_authentication, and — when registration was requested —
+     * approval_type and the presence of a registration_url.
+     *
+     * @param stdClass $zoom The meeting as intended by Moodle.
+     * @param array $data The request payload sent to Zoom (intent).
+     * @param string|int|null $meetingid The Zoom meeting ID to read back (null skips verification).
+     * @return void
+     * @throws moodle_exception When the read-back does not match the written intent.
+     */
+    private function verify_readback($zoom, $data, $meetingid) {
+        if (empty($meetingid)) {
+            return;
+        }
+
+        $readback = $this->get_meeting_webinar_info($meetingid, !empty($zoom->webinar));
+
+        // A scheduled meeting converted to the host's PMI — the Personal
+        // Meeting ID, every Zoom user's permanent personal room with its own
+        // fixed settings (Zoom meeting type 4, no plugin constant) — loses the
+        // per-meeting settings we just wrote, including registration.
+        $pmiconverted = (($readback->type ?? 0) == 4);
+
+        $authmismatch = isset($data['settings']['meeting_authentication'])
+            && (bool) ($readback->settings->meeting_authentication ?? false)
+                !== (bool) $data['settings']['meeting_authentication'];
+
+        $wantsregistration = isset($data['settings']['approval_type'])
+            && in_array($data['settings']['approval_type'], [ZOOM_REGISTRATION_AUTOMATIC, ZOOM_REGISTRATION_MANUAL]);
+        $registrationdropped = false;
+        if ($wantsregistration) {
+            $approvaltype = $readback->settings->approval_type ?? ZOOM_REGISTRATION_OFF;
+            $registrationdropped = empty($readback->registration_url)
+                || $approvaltype != $data['settings']['approval_type'];
+        }
+
+        if ($registrationdropped || $pmiconverted || $authmismatch) {
+            \mod_zoom\event\registration_dropped::create([
+                'context' => \context_system::instance(),
+                'other' => ['meetingid' => (int) $meetingid, 'hostid' => $zoom->host_id],
+            ])->trigger();
+            throw new moodle_exception('zoomerr_registration_dropped', 'mod_zoom');
+        }
     }
 
     /**
@@ -1375,6 +1547,37 @@ class webservice {
         ]);
 
         return $token;
+    }
+
+    /**
+     * Register a participant for a meeting/webinar and get their personal join link.
+     *
+     * Pooled-hosts feature (see README.md, 'Pooled hosts mode'): auto-registration —
+     * the LMS already knows the participant's identity, so the registrant is
+     * created server-side (name enforcement via the returned tk link) and the
+     * student never sees Zoom's registration form. License-gated on the host
+     * (measured, T6) — pool hosts are Licensed by the picker for registration
+     * meetings.
+     *
+     * @param string|int $meetingid The meeting/webinar ID.
+     * @param bool $webinar Whether it is a webinar.
+     * @param string $email Registrant email.
+     * @param string $firstname Registrant first name.
+     * @param string $lastname Registrant last name.
+     * @return stdClass Response incl. join_url (the personal tk link).
+     *
+     * No occurrence_ids on purpose: meetings are created with
+     * registration_type 1 (register once, all occurrences), so a registrant
+     * with no occurrence list is valid for the entire series.
+     */
+    public function add_meeting_registrant($meetingid, $webinar, $email, $firstname, $lastname) {
+        // Granular: meeting:write:registrant:admin / webinar:write:registrant:admin.
+        $url = ($webinar ? 'webinars/' : 'meetings/') . $meetingid . '/registrants';
+        return $this->make_call($url, [
+            'email' => $email,
+            'first_name' => $firstname,
+            'last_name' => $lastname,
+        ], 'post');
     }
 
     /**
