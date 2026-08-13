@@ -931,7 +931,7 @@ function zoom_get_api_url() {
  * @param bool $usestarturl
  * @return array $returns contains url object 'nexturl' or string 'error'
  */
-function zoom_load_meeting($id, $context, $usestarturl = true) {
+function zoom_load_meeting($id, $context, $usestarturl = true, $browserjoin = false) {
     global $CFG, $DB, $USER;
     require_once($CFG->libdir . '/gradelib.php');
 
@@ -985,6 +985,23 @@ function zoom_load_meeting($id, $context, $usestarturl = true) {
         $url = $zoom->join_url;
         if ($userisregistered) {
             $url = $registrantjoinurl;
+        } else if ($userisregistering) {
+            // FormaSuisse patch (see README.md, 'FormaSuisse patch'): a user is
+            // "registering" when the meeting requires registration and they have
+            // no registrant entry yet — this click is about to redirect them to
+            // Zoom's registration form (the plain join_url serves that form for
+            // registration meetings). Creating the registrant there is a
+            // license-gated write on Zoom's side (measured, T6), so ensure the
+            // host holds a seat first; otherwise show a retryable error instead
+            // of a broken Zoom form.
+            try {
+                zoom_webservice()->with_seat($zoom->host_id, 'write');
+            } catch (\mod_zoom\seat_unavailable_exception $error) {
+                error_log('mod_zoom_seat_alert reason=' . ($error->reason === 'quota' ? 'quota' : 'refused-write')
+                    . " host={$zoom->host_id} meeting={$zoom->meeting_id}");
+                $returns['error'] = get_string('zoomerr_seat_unavailable', 'mod_zoom');
+                return $returns;
+            }
         }
 
         $unamesetting = get_config('zoom', 'unamedisplay');
@@ -1007,8 +1024,16 @@ function zoom_load_meeting($id, $context, $usestarturl = true) {
                 break;
         }
 
-        // Try to send the user email (not guaranteed).
-        $returns['nexturl'] = new moodle_url($url, ['uname' => $unamedisplay, 'uemail' => $USER->email]);
+        if ($browserjoin) {
+            // FormaSuisse patch (see README.md, 'FormaSuisse patch'): direct web-client join.
+            // The /w/ launcher's own "join from browser" fallback drops the
+            // personal ?tk= token (measured, T9) — build the /wc/join/ URL
+            // ourselves, preserving tk and pwd.
+            $returns['nexturl'] = zoom_get_browser_join_url($url, $zoom->meeting_id);
+        } else {
+            // Try to send the user email (not guaranteed).
+            $returns['nexturl'] = new moodle_url($url, ['uname' => $unamedisplay, 'uemail' => $USER->email]);
+        }
     }
 
     // If the user is pre-registering, skip grading/completion.
@@ -1061,10 +1086,18 @@ function zoom_load_meeting($id, $context, $usestarturl = true) {
     } // Otherwise, the get_meetings_report task calculates the grades according to duration.
 
     // Upgrade host upon joining meeting, if host is not Licensed.
+    // FormaSuisse patch (see README.md, 'FormaSuisse patch'): seat-guarded. On refusal the
+    // start proceeds unlicensed (40-minute fuse) and an alert line is emitted —
+    // a class start is never blocked, the alert is the buy-a-seat signal.
     if ($userishost) {
         $config = get_config('zoom');
         if (!empty($config->recycleonjoin)) {
-            zoom_webservice()->provide_license($zoom->host_id);
+            try {
+                zoom_webservice()->with_seat($zoom->host_id, 'start');
+            } catch (\mod_zoom\seat_unavailable_exception $error) {
+                error_log('mod_zoom_seat_alert reason=' . ($error->reason === 'quota' ? 'quota' : 'refused-start')
+                    . " host={$zoom->host_id} meeting={$zoom->meeting_id}");
+            }
         }
     }
 
@@ -1329,6 +1362,37 @@ function zoom_get_registrant_join_url($useremail, $meetingid, $iswebinar) {
     }
 
     return false;
+}
+
+/**
+ * Build a direct Zoom web-client join URL from an app join/registrant URL.
+ *
+ * FormaSuisse patch (see README.md, 'FormaSuisse patch'): the /w/ launcher's own browser
+ * fallback drops the personal ?tk= registrant token (measured,
+ * T9), so we build https://{host}/wc/join/{id}
+ * ourselves, carrying over tk and pwd.
+ *
+ * @param string $joinurl The meeting join URL or personal registrant join URL.
+ * @param string $meetingid Zoom meeting ID.
+ * @return moodle_url The web-client join URL.
+ */
+function zoom_get_browser_join_url($joinurl, $meetingid) {
+    $parts = parse_url($joinurl);
+    parse_str($parts['query'] ?? '', $query);
+
+    // tk and pwd are not mutually exclusive: a registrant link carries BOTH the
+    // personal tk token and the embedded passcode; a plain join_url carries pwd
+    // only. Either can be absent, so both are copied conditionally.
+    $wcparams = [];
+    if (!empty($query['tk'])) {
+        $wcparams['tk'] = $query['tk'];
+    }
+
+    if (!empty($query['pwd'])) {
+        $wcparams['pwd'] = $query['pwd'];
+    }
+
+    return new moodle_url('https://' . $parts['host'] . '/wc/join/' . $meetingid, $wcparams);
 }
 
 /**

@@ -46,7 +46,7 @@ class mod_zoom_mod_form extends moodleform_mod {
      * Defines forms elements
      */
     public function definition() {
-        global $PAGE, $USER, $OUTPUT;
+        global $CFG, $PAGE, $USER, $OUTPUT;
 
         // We don't do anything custom with completion data, so avoid doing any unnecessary work.
         $completionpagetypes = [
@@ -86,8 +86,12 @@ class mod_zoom_mod_form extends moodleform_mod {
 
         if (!empty($canschedule)) {
             // Add the current user.
+            // FormaSuisse patch (see README.md, 'FormaSuisse patch'): the dropdown
+            // value is sent to Zoom as the host identifier, so it must be the
+            // user's Zoom identity (apiidentifier, e.g. the zoomid field), not
+            // their Moodle email — those differ under the shadow-alias design.
             $canschedule[$zoomuserid] = new stdClass();
-            $canschedule[$zoomuserid]->email = $USER->email;
+            $canschedule[$zoomuserid]->email = zoom_get_api_identifier($USER);
 
             // If the activity exists and the current user is not the current host.
             if (!$isnew && $zoomuserid !== $this->current->host_id) {
@@ -106,6 +110,17 @@ class mod_zoom_mod_form extends moodleform_mod {
             // Get list of users who can add Zoom activities in this context.
             $moodleusers = get_enrolled_users($this->context, 'mod/zoom:addinstance', 0, 'u.*', 'lastname');
 
+            // FormaSuisse patch (see README.md, 'FormaSuisse patch'): match
+            // candidates through the configured apiidentifier (e.g. the zoomid
+            // profile field) instead of the raw Moodle email — under the
+            // shadow-alias design a trainer's Zoom email never equals their
+            // Moodle email, so upstream's email matching finds nobody. Custom
+            // profile fields are not loaded by get_enrolled_users(), load them.
+            require_once($CFG->dirroot . '/user/profile/lib.php');
+            foreach ($moodleusers as $muser) {
+                profile_load_custom_fields($muser);
+            }
+
             // Check each potential host to see if they are a valid host.
             foreach ($canschedule as $zoomuserinfo) {
                 $zoomemail = strtolower($zoomuserinfo->email);
@@ -113,13 +128,13 @@ class mod_zoom_mod_form extends moodleform_mod {
                     continue;
                 }
 
-                if ($zoomemail === strtolower($USER->email)) {
+                if ($zoomemail === strtolower(zoom_get_api_identifier($USER))) {
                     $scheduleusers[$zoomemail] = get_string('scheduleforself', 'zoom');
                     continue;
                 }
 
                 foreach ($moodleusers as $muser) {
-                    if ($zoomemail === strtolower($muser->email)) {
+                    if ($zoomemail === strtolower(zoom_get_api_identifier($muser))) {
                         $scheduleusers[$zoomemail] = fullname($muser);
                         break;
                     }

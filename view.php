@@ -220,19 +220,31 @@ if (!$showrecreate) {
     }
 
     if ($available) {
-        // Show join meeting button.
-        $btntext = $strjoin;
-
-        // If user is not already registered, use register text.
-        if ($zoom->registration != ZOOM_REGISTRATION_OFF && !$userisregistered) {
-            $btntext = $strregister;
-        }
+        // "Registered" = the user already has a Zoom registrant entry (and thus a
+        // personal tk join link) for this meeting; it is unrelated to webinars or
+        // to being signed into Zoom. A user still needing registration gets the
+        // "Register" button, which leads them to Zoom's registration form.
+        $userneedsregistration = ($zoom->registration != ZOOM_REGISTRATION_OFF && !$userisregistered);
+        $btntext = $userneedsregistration ? $strregister : $strjoin;
 
         $buttonhtml = html_writer::tag('button', $btntext, ['type' => 'submit', 'class' => 'btn btn-primary']);
 
         $aurl = new moodle_url('/mod/zoom/loadmeeting.php', ['id' => $cm->id]);
         $buttonhtml .= html_writer::input_hidden_params($aurl);
         $link = html_writer::tag('form', $buttonhtml, ['action' => $aurl->out_omit_querystring(), 'target' => '_blank']);
+
+        // FormaSuisse patch (see README.md, 'FormaSuisse patch'): second action button joining
+        // straight in the Zoom web client, preserving the personal ?tk= token.
+        // Hosts always start via the app path; users still needing registration
+        // must register before any join path exists.
+        if (!$userishost && !$userneedsregistration) {
+            $browserurl = new moodle_url('/mod/zoom/loadmeeting.php', ['id' => $cm->id, 'browser' => 1]);
+            $browserbuttonhtml = html_writer::tag('button', get_string('joinbrowser', 'mod_zoom'),
+                ['type' => 'submit', 'class' => 'btn btn-secondary mt-2']);
+            $browserbuttonhtml .= html_writer::input_hidden_params($browserurl);
+            $link .= html_writer::tag('form', $browserbuttonhtml,
+                ['action' => $browserurl->out_omit_querystring(), 'target' => '_blank']);
+        }
     } else {
         // Get unavailability note.
         $unavailabilitynote = zoom_get_unavailability_note($zoom, $finished);
