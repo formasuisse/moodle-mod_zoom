@@ -585,6 +585,22 @@ class get_meeting_reports extends scheduled_task {
                 ));
                 $participant = $this->format_participant($rawparticipant, $detailsid, $names, $emails);
 
+                // Pooled-hosts feature (see README.md, 'FormaSuisse
+                // patch'): the host row carries the pool identity, which no
+                // email/name matching can resolve — map it deterministically to
+                // the activity's teacher.
+                if (
+                    zoom_pooled_group() !== null
+                    && !empty($zoomrecord->teacherid)
+                    && ($participant['zoomuserid'] ?? '') === $zoomrecord->host_id
+                ) {
+                    $teacheruser = \core_user::get_user($zoomrecord->teacherid);
+                    if ($teacheruser) {
+                        $participant['userid'] = $teacheruser->id;
+                        $participant['name'] = strtoupper(fullname($teacheruser));
+                    }
+                }
+
                 // These conditions are enough.
                 $conditions = [
                     'name' => $participant['name'],
