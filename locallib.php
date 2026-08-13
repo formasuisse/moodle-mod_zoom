@@ -111,7 +111,13 @@ define('ZOOM_AUTORECORDING_NONE', 'none');
 define('ZOOM_AUTORECORDING_USERDEFAULT', 'userdefault');
 define('ZOOM_AUTORECORDING_LOCAL', 'local');
 define('ZOOM_AUTORECORDING_CLOUD', 'cloud');
-// Registration options.
+// Registration options (Moodle-level semantics; on the Zoom side both
+// non-OFF modes create auto-approved registration meetings — the difference
+// is WHO creates the registrant):
+// AUTOMATIC: Moodle registers the participant server-side with their Moodle
+//            identity (pre-named, no form).
+// MANUAL:    participants register themselves on Zoom's form — an explicit
+//            "I will attend" (RSVP); the typed name is not enforced by Moodle.
 define('ZOOM_REGISTRATION_AUTOMATIC', 0);
 define('ZOOM_REGISTRATION_MANUAL', 1);
 define('ZOOM_REGISTRATION_OFF', 2);
@@ -954,9 +960,44 @@ function zoom_load_meeting($id, $context, $usestarturl = true) {
         $registrantjoinurl = zoom_get_registrant_join_url($USER->email, $zoom->meeting_id, $zoom->webinar);
         $userisregistered = !empty($registrantjoinurl);
 
-        // Allow unregistered users to register.
+        if (!$userisregistered) {
+            // Server-side registration (see README.md, 'Pooled hosts mode'):
+            // the LMS already knows who this is — create the registrant with
+            // the Moodle identity and use the returned personal tk link. No
+            // Zoom form, nothing to type, and the registered name is the
+            // Moodle name by construction. In AUTOMATIC mode this happens
+            // invisibly on the first Join click; in MANUAL (RSVP) mode the
+            // button says Register and this click IS the explicit RSVP —
+            // same mechanics, same enforced identity.
+            try {
+                $registrant = zoom_webservice()->add_meeting_registrant(
+                    $zoom->meeting_id,
+                    $zoom->webinar,
+                    $USER->email,
+                    $USER->firstname,
+                    $USER->lastname
+                );
+                if (!empty($registrant->join_url)) {
+                    $registrantjoinurl = $registrant->join_url;
+                    $userisregistered = true;
+                }
+            } catch (moodle_exception $error) {
+                debugging('mod_zoom auto-registration failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
+            }
+        }
+
+        // Registration failed (API hiccup): fall back to Zoom's registration page.
         if (!$userisregistered) {
             $userisregistering = true;
+        }
+
+        // Registered ahead of the join window (RSVP click, or an early Join
+        // click): confirm instead of erroring — the join button appears once
+        // the session window opens.
+        [$inprogressnow, $availablenow] = zoom_get_state($zoom);
+        if ($userisregistered && !$availablenow) {
+            $returns['notification'] = get_string('registration_done', 'mod_zoom');
+            return $returns;
         }
     }
 
@@ -967,17 +1008,57 @@ function zoom_load_meeting($id, $context, $usestarturl = true) {
         return $returns;
     }
 
-    $userisrealhost = (zoom_get_user_id(false) === $zoom->host_id);
+    if (zoom_pooled_group() !== null) {
+        // Pooled-hosts feature (see README.md, 'Pooled hosts mode'):
+        // the activity's teacher field decides hosting — the teacher has no
+        // Zoom identity of their own, the pool host is infrastructure.
+        $userisrealhost = (!empty($zoom->teacherid) && $zoom->teacherid == $USER->id);
+    } else {
+        $userisrealhost = (zoom_get_user_id(false) === $zoom->host_id);
+    }
+
+    // Alternative hosts keep working in both modes: anyone whose Zoom email is
+    // listed on the meeting can still claim host through Zoom's own mechanics.
     $alternativehosts = zoom_get_alternative_host_array_from_string($zoom->alternative_hosts);
     // Lowercase email addresses so that we can do case-insensitive comparisons.
     $userapiidentifier = zoom_get_api_identifier($USER);
     if (filter_var($userapiidentifier, FILTER_VALIDATE_EMAIL) !== false) {
         $userapiidentifier = strtolower($userapiidentifier);
     }
+
     $userishost = ($userisrealhost || in_array($userapiidentifier, $alternativehosts, true));
 
     // Check if we should use the start meeting url.
     if ($userisrealhost && $usestarturl) {
+        if (zoom_pooled_group() !== null) {
+            // Pooled-hosts feature: warn ops when the pool host is
+            // still in another live meeting (starting anyway prompts the
+            // teacher to end it — T12), rename the host to the teacher's name,
+            // and queue the end-of-session task that restores it.
+            try {
+                foreach (zoom_webservice()->get_user_live_meetings($zoom->host_id) as $livemeeting) {
+                    if ((string) $livemeeting->id !== (string) $zoom->meeting_id) {
+                        \mod_zoom\event\collision_imminent::create([
+                            'context' => $context,
+                            'objectid' => $zoom->id,
+                            'other' => [
+                                'meetingid' => (int) $zoom->meeting_id,
+                                'hostid' => $zoom->host_id,
+                                'cmid' => $id,
+                                'courseid' => (int) $zoom->course,
+                            ],
+                        ])->trigger();
+                        break;
+                    }
+                }
+            } catch (moodle_exception $error) {
+                debugging('mod_zoom pooled live-check failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
+            }
+
+            zoom_pooled_apply_rename($zoom, $USER);
+            \mod_zoom\task\end_of_session::queue_for($zoom);
+        }
+
         // Important: Only the real host can use this URL, because it joins the meeting as the host user.
         $starturl = zoom_get_start_url($zoom->meeting_id, $zoom->webinar, $zoom->join_url);
         $returns['nexturl'] = new moodle_url($starturl);
@@ -1329,6 +1410,216 @@ function zoom_get_registrant_join_url($useremail, $meetingid, $iswebinar) {
     }
 
     return false;
+}
+
+/**
+ * The configured pooled-hosts group name, or null when pooled mode is off.
+ *
+ * Pooled-hosts feature (see README.md, 'Pooled hosts mode'): pooled
+ * mode is on iff zoom/pooledhostsgroup is non-empty.
+ *
+ * @return ?string
+ */
+function zoom_pooled_group() {
+    $group = trim((string) get_config('zoom', 'pooledhostsgroup'));
+    return ($group !== '') ? $group : null;
+}
+
+/**
+ * Get the pool member Zoom user objects for the configured group.
+ *
+ * Pooled-hosts feature. Fails loudly (never degrades to an empty
+ * pool) when the configured group does not exist or cannot be read.
+ *
+ * @param ?context $context Context for the pool_misconfigured event (system context if null).
+ * @return array Zoom user objects (full /users/{id} payload, so ->type is present).
+ * @throws moodle_exception When the configured group is missing/unreadable.
+ */
+function zoom_pooled_members($context = null) {
+    $groupname = zoom_pooled_group();
+    $service = zoom_webservice();
+
+    $groupid = $service->get_group_id_by_name($groupname);
+    if ($groupid === false) {
+        \mod_zoom\event\pool_misconfigured::create([
+            'context' => $context ?? context_system::instance(),
+            'other' => ['group' => $groupname],
+        ])->trigger();
+        throw new moodle_exception('zoomerr_pool_misconfigured', 'mod_zoom', '', $groupname);
+    }
+
+    // Member payloads carry id/email/type directly (measured, T13) — no
+    // per-member user lookup needed.
+    $members = array_filter($service->get_group_members($groupid));
+
+    // Default-on safety net: only Licensed pool members may host (a Basic
+    // host's registration-bearing writes are silently stripped — T1/T3).
+    $requirelicense = get_config('zoom', 'pooledrequirelicense');
+    if ($requirelicense === false || $requirelicense === '' || $requirelicense === null || $requirelicense) {
+        $members = array_filter($members, function ($member) {
+            return ($member->type ?? ZOOM_USER_TYPE_BASIC) != ZOOM_USER_TYPE_BASIC;
+        });
+    }
+
+    // Empty pool — whether the group has no members or none survive the
+    // license filter — is a configuration problem, not a capacity signal.
+    if (empty($members)) {
+        \mod_zoom\event\pool_misconfigured::create([
+            'context' => $context ?? context_system::instance(),
+            'other' => ['group' => $groupname],
+        ])->trigger();
+        throw new moodle_exception('zoomerr_pool_misconfigured', 'mod_zoom', '', $groupname);
+    }
+
+    return array_values($members);
+}
+
+/**
+ * Whether a candidate pool host has a scheduling conflict for a slot.
+ *
+ * Pooled-hosts feature. Checks the host's complete Zoom calendar
+ * (includes meetings scheduled outside Moodle) against the slot, requiring
+ * zoom/slotbuffer minutes of gap on both sides. Meetings without a start time
+ * (recurring with no fixed time) cannot be evaluated and are ignored.
+ * NB Zoom itself accepts overlapping schedules — only runtime enforces
+ * one-active-meeting (T12) — so this check is the only scheduling-time guard.
+ *
+ * @param string $zoomuserid Candidate pool host.
+ * @param int $start Slot start (Unix timestamp).
+ * @param int $duration Slot duration (seconds).
+ * @param ?int $excludemeetingid Meeting ID to ignore (when revalidating an existing meeting).
+ * @return bool
+ */
+function zoom_pooled_slot_conflicts($zoomuserid, $start, $duration, $excludemeetingid = null) {
+    $bufferseconds = ((int) get_config('zoom', 'slotbuffer') ?: 15) * MINSECS;
+    $slotstart = $start - $bufferseconds;
+    $slotend = $start + $duration + $bufferseconds;
+
+    // Bound the listing server-side to the day(s) around the slot. UTC dates
+    // on purpose: Zoom interprets from/to as dates, and the one-day padding on
+    // each side absorbs any timezone offset between UTC and the account TZ.
+    // The overlap math itself is all epoch-based (Zoom start_time is ISO8601
+    // UTC, strtotime handles the Z suffix), so only these bounds involve dates.
+    $from = gmdate('Y-m-d', $slotstart - DAYSECS);
+    $to = gmdate('Y-m-d', $slotend + DAYSECS);
+
+    foreach (zoom_webservice()->get_user_upcoming_meetings($zoomuserid, $from, $to) as $meeting) {
+        if ($excludemeetingid !== null && (string) $meeting->id === (string) $excludemeetingid) {
+            continue;
+        }
+
+        if (empty($meeting->start_time)) {
+            continue;
+        }
+
+        $otherstart = strtotime($meeting->start_time);
+        $otherend = $otherstart + (($meeting->duration ?? 60) * MINSECS);
+        if ($otherstart < $slotend && $otherend > $slotstart) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Pick a pool host with a free slot for the given meeting, or fail loudly.
+ *
+ * Pooled-hosts feature: called at activity save time in pooled mode.
+ * A save that finds no free host errors out — that error is the capacity
+ * (buy-a-seat) signal, surfaced via the pool_exhausted event.
+ *
+ * @param stdClass $zoom The meeting as built from the form.
+ * @param ?context $context Module/course context for events.
+ * @return string The chosen Zoom user ID.
+ * @throws moodle_exception When no pool host is free for the slot.
+ */
+function zoom_pooled_pick_host($zoom, $context = null) {
+    $members = zoom_pooled_members($context);
+
+    // Registration is a licensed-host feature (an unlicensed host's
+    // registration settings are silently stripped — T1): registration-bearing
+    // meetings only consider Licensed pool members, whatever
+    // pooledrequirelicense says.
+    if (isset($zoom->registration) && $zoom->registration != ZOOM_REGISTRATION_OFF) {
+        $members = array_values(array_filter($members, function ($member) {
+            return ($member->type ?? ZOOM_USER_TYPE_BASIC) != ZOOM_USER_TYPE_BASIC;
+        }));
+    }
+
+    // Teacher stickiness: start scanning at a position derived from the
+    // teacher, so the same teacher's sessions tend to land on the same pool
+    // host — their own meetings never overlap, which keeps overrun collisions
+    // between DIFFERENT teachers' slots, where the buffer already guards.
+    if (!empty($zoom->teacherid) && count($members) > 1) {
+        $offset = crc32((string) $zoom->teacherid) % count($members);
+        $members = array_merge(array_slice($members, $offset), array_slice($members, 0, $offset));
+    }
+
+    // Recurring-no-fixed-time meetings have no slot to check — first member wins.
+    $start = (int) ($zoom->start_time ?? 0);
+    $duration = (int) ($zoom->duration ?? 0);
+    $exclude = !empty($zoom->meeting_id) && $zoom->meeting_id != -1 ? $zoom->meeting_id : null;
+
+    foreach ($members as $member) {
+        if ($start === 0 || !zoom_pooled_slot_conflicts($member->id, $start, $duration, $exclude)) {
+            return $member->id;
+        }
+    }
+
+    \mod_zoom\event\pool_exhausted::create([
+        'context' => $context ?? context_system::instance(),
+        'other' => ['start' => $start, 'duration' => $duration],
+    ])->trigger();
+    throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+}
+
+/**
+ * Apply the host-name templates before a pooled session start, with CAS stash.
+ *
+ * Pooled-hosts feature. Renders zoom/hostfirstnametemplate and
+ * zoom/hostlastnametemplate (placeholders %first/%last from the teacher's
+ * Moodle name) onto the pool host, stashing (previous, set) on the zoom
+ * record so the end-of-session task can restore compare-and-swap style: it
+ * only restores while the current name still equals what we set — any other
+ * value means someone renamed out of band, hands off. Rename failures are
+ * swallowed — a class start is never blocked over a display name.
+ *
+ * @param stdClass $zoom The zoom activity record.
+ * @param stdClass $teacher The Moodle user record of the teacher.
+ * @return void
+ */
+function zoom_pooled_apply_rename($zoom, $teacher) {
+    global $DB;
+
+    $firsttemplate = trim((string) get_config('zoom', 'hostfirstnametemplate'));
+    $lasttemplate = trim((string) get_config('zoom', 'hostlastnametemplate'));
+    if ($firsttemplate === '' && $lasttemplate === '') {
+        return;
+    }
+
+    try {
+        $hostuser = zoom_get_user($zoom->host_id);
+        if (empty($hostuser)) {
+            return;
+        }
+
+        $setfirst = str_replace(['%first', '%last'], [$teacher->firstname, $teacher->lastname],
+            $firsttemplate !== '' ? $firsttemplate : '%first');
+        $setlast = str_replace(['%first', '%last'], [$teacher->firstname, $teacher->lastname],
+            $lasttemplate !== '' ? $lasttemplate : '%last');
+
+        $DB->set_field('zoom', 'poolrename', json_encode([
+            'prevfirst' => $hostuser->first_name ?? '',
+            'prevlast' => $hostuser->last_name ?? '',
+            'setfirst' => $setfirst,
+            'setlast' => $setlast,
+        ]), ['id' => $zoom->id]);
+
+        zoom_webservice()->update_user_name($zoom->host_id, $setfirst, $setlast);
+    } catch (moodle_exception $error) {
+        debugging('mod_zoom pooled rename failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
+    }
 }
 
 /**
