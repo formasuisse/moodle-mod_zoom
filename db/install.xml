@@ -122,6 +122,8 @@
         <FIELD NAME="name" TYPE="char" LENGTH="300" NOTNULL="true" SEQUENCE="false" COMMENT="Recording topic. Max of 300 characters."/>
         <FIELD NAME="externalurl" TYPE="text" NOTNULL="true" SEQUENCE="false" COMMENT="Link to view the recording."/>
         <FIELD NAME="passcode" TYPE="char" LENGTH="30" NOTNULL="false" SEQUENCE="false" COMMENT="Passcode to access the recording."/>
+        <FIELD NAME="playpasscode" TYPE="char" LENGTH="255" NOTNULL="false" SEQUENCE="false" COMMENT="URL-safe play token (recording_play_passcode) appended to the link so viewers skip the passcode prompt."/>
+        <FIELD NAME="timepurged" TYPE="int" LENGTH="12" NOTNULL="false" SEQUENCE="false" COMMENT="Timestamp when the recording was purged on Zoom (retention); row is kept and rendered as no-longer-available."/>
         <FIELD NAME="recordingtype" TYPE="char" LENGTH="50" NOTNULL="true" SEQUENCE="false" COMMENT="Type of recording."/>
         <FIELD NAME="recordingstart" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false"/>
         <FIELD NAME="showrecording" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="0" SEQUENCE="false"/>

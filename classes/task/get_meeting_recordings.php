@@ -74,7 +74,7 @@ class get_meeting_recordings extends scheduled_task {
             ],
             'granular' => [
                 'cloud_recording:read:list_user_recordings:admin',
-                'cloud_recording:read:recording_settings:admin',
+                'cloud_recording:read:list_recording_files:admin',
             ],
         ];
 
@@ -116,7 +116,7 @@ class get_meeting_recordings extends scheduled_task {
             return;
         }
 
-        $meetingpasscodes = [];
+        $meetingdata = [];
         $localrecordings = zoom_get_meeting_recordings_grouped();
 
         foreach ($hostmeetings as $hostid => $meetings) {
@@ -144,11 +144,24 @@ class get_meeting_recordings extends scheduled_task {
                     continue;
                 }
 
-                // As of 2023-09-24, 'password' is not present in the user recordings API response.
-                if (empty($meetingpasscodes[$recording->meetinguuid])) {
+                // Pooled-hosts feature: fetch the meeting's own recordings
+                // response once per meeting. It carries the passcode, the
+                // URL-safe play token and per-file URLs — token and URL must
+                // come from the SAME response (Zoom re-mints all link fields
+                // on every call).
+                if (empty($meetingdata[$recording->meetinguuid])) {
                     try {
-                        $settings = $service->get_recording_settings($recording->meetinguuid);
-                        $meetingpasscodes[$recording->meetinguuid] = $settings->password;
+                        $data = $service->get_meeting_recording_data($recording->meetinguuid);
+                        $files = [];
+                        foreach ($data->recording_files ?? [] as $file) {
+                            $files[$file->id] = $file;
+                        }
+
+                        $meetingdata[$recording->meetinguuid] = (object) [
+                            'password' => $data->password ?? '',
+                            'playpasscode' => $data->recording_play_passcode ?? '',
+                            'files' => $files,
+                        ];
                     } catch (moodle_exception $error) {
                         continue;
                     }
@@ -162,8 +175,11 @@ class get_meeting_recordings extends scheduled_task {
                 $record->meetinguuid = $recording->meetinguuid;
                 $record->zoomrecordingid = $recordingid;
                 $record->name = $zoom->name;
-                $record->externalurl = $recording->url;
-                $record->passcode = $meetingpasscodes[$recording->meetinguuid];
+                $meetinginfo = $meetingdata[$recording->meetinguuid];
+                $samecallfile = $meetinginfo->files[$recordingid] ?? null;
+                $record->externalurl = $samecallfile->play_url ?? $recording->url;
+                $record->passcode = $meetinginfo->password;
+                $record->playpasscode = $meetinginfo->playpasscode;
                 $record->recordingtype = $recordingtype;
                 $record->recordingstart = $recording->recordingstart;
                 $record->showrecording = $zoom->recordings_visible_default;

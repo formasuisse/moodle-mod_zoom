@@ -54,20 +54,23 @@ $iszoommanager = has_capability('mod/zoom:addinstance', $context);
 // Set up html table.
 $table = new html_table();
 $table->attributes['class'] = 'generaltable mod_view';
+// Pooled-hosts feature: availability gets its own column (retention window).
 if ($iszoommanager) {
+    $table->align = ['left', 'left', 'left', 'left', 'left'];
+    $table->head = [
+        get_string('recordingdate', 'mod_zoom'),
+        get_string('recordinglink', 'mod_zoom'),
+        get_string('recordingpasscode', 'mod_zoom'),
+        get_string('recording_availability', 'mod_zoom'),
+        get_string('recordingshowtoggle', 'mod_zoom'),
+    ];
+} else {
     $table->align = ['left', 'left', 'left', 'left'];
     $table->head = [
         get_string('recordingdate', 'mod_zoom'),
         get_string('recordinglink', 'mod_zoom'),
         get_string('recordingpasscode', 'mod_zoom'),
-        get_string('recordingshowtoggle', 'mod_zoom'),
-    ];
-} else {
-    $table->align = ['left', 'left', 'left'];
-    $table->head = [
-        get_string('recordingdate', 'mod_zoom'),
-        get_string('recordinglink', 'mod_zoom'),
-        get_string('recordingpasscode', 'mod_zoom'),
+        get_string('recording_availability', 'mod_zoom'),
     ];
 }
 
@@ -87,6 +90,9 @@ if (empty($recordings)) {
         $recordinghtml = '';
         $recordingpasscode = '';
         $recordingshowhtml = '';
+        $anyactive = false;
+        $anypurged = false;
+        $availabilitycell = '';
         foreach ($grouping as $recording) {
             // If zoom admin -> show all recordings.
             // Or if visible to students.
@@ -95,10 +101,12 @@ if (empty($recordings)) {
                     $recordingdate = date('F j, Y, g:i:s a \P\T', $recording->recordingstart);
                 }
 
-                if (empty($recordingpasscode)) {
-                    // Passcode is nullable in the DB (recordings without a
-                    // passcode) — htmlspecialchars(null) is deprecated on
-                    // PHP 8.1+ and renders a debug notice on this page.
+                // Pooled-hosts feature: rows with a play token embed the
+                // passcode in the link — nothing for the viewer to type, so
+                // show the passcode only for legacy rows without one.
+                // (Passcode is nullable — coalesce for htmlspecialchars on
+                // PHP 8.1+.)
+                if (empty($recordingpasscode) && empty($recording->playpasscode)) {
                     $recordingpasscode = $recording->passcode ?? '';
                 }
 
@@ -126,16 +134,71 @@ if (empty($recordings)) {
                 }
 
                 $recordingname = trim($recording->name) . ' (' . zoom_get_recording_type_string($recording->recordingtype) . ')';
+
+                // Pooled-hosts feature: purged recordings stay listed —
+                // "it was there yesterday" must never become an empty
+                // list — but render as plain text, no link; the
+                // availability column carries the explanation.
+                if (!empty($recording->timepurged)) {
+                    $anypurged = true;
+                    $recordinghtml .= html_writer::div(html_writer::span($recordingname, 'recording-expired text-muted'), 'recording', ['style' => 'margin-bottom:.5rem']);
+                    continue;
+                }
+
+                $anyactive = true;
+
                 $params = ['id' => $cm->id, 'recordingid' => $recording->id];
                 $recordingurl = new moodle_url('/mod/zoom/loadrecording.php', $params);
                 $recordinglink = html_writer::link($recordingurl, $recordingname);
                 $recordinglinkhtml = html_writer::span($recordinglink, 'recording-link', ['style' => 'margin-right:1rem']);
                 $recordinghtml .= html_writer::div($recordinglinkhtml, 'recording', ['style' => 'margin-bottom:.5rem']);
+
+                // Availability column: until recordingstart +
+                // zoom/recordingretentiondays (all files of a session share
+                // the same clock).
+                $retentiondays = (int) get_config('zoom', 'recordingretentiondays');
+                if ($retentiondays > 0 && empty($availabilitycell)) {
+                    $until = userdate($recording->recordingstart + ($retentiondays * DAYSECS), get_string('strftimedate', 'core_langconfig'));
+                    $availabilitycell = get_string('recording_available_until', 'mod_zoom', $until);
+                }
             }
         }
 
-        // Output only one row per grouping.
-        $table->data[] = [$recordingdate, $recordinghtml, htmlspecialchars($recordingpasscode), $recordingshowhtml];
+        if (!$anyactive && $anypurged) {
+            $availabilitycell = get_string('recording_expired', 'mod_zoom');
+        }
+
+        // Output only one row per grouping. The show/hide toggle column
+        // exists only in the manager layout (upstream appended the cell for
+        // everyone, leaving students with one more cell than headers).
+        $row = [$recordingdate, $recordinghtml, htmlspecialchars($recordingpasscode), $availabilitycell];
+        if ($iszoommanager) {
+            $row[] = $recordingshowhtml;
+        }
+
+        $table->data[] = $row;
+    }
+
+    // Pooled-hosts feature: when no shown row needs a passcode (play tokens
+    // embed it in the link), drop the whole passcode column instead of
+    // rendering an empty one.
+    $haspasscode = false;
+    foreach ($table->data as $row) {
+        if (!empty($row[2])) {
+            $haspasscode = true;
+            break;
+        }
+    }
+
+    if (!$haspasscode) {
+        unset($table->head[2]);
+        unset($table->align[2]);
+        $table->head = array_values($table->head);
+        $table->align = array_values($table->align);
+        foreach ($table->data as $key => $row) {
+            unset($row[2]);
+            $table->data[$key] = array_values($row);
+        }
     }
 }
 
