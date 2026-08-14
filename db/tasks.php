@@ -62,6 +62,15 @@ $tasks = [
         'month' => '*',
     ],
     [
+        'classname' => 'mod_zoom\task\purge_recordings',
+        'blocking' => 0,
+        'minute' => '30',
+        'hour' => '3',
+        'day' => '*',
+        'dayofweek' => '*',
+        'month' => '*',
+    ],
+    [
         'classname' => 'mod_zoom\task\delete_meeting_recordings',
         'blocking' => 0,
         'minute' => '0',

@@ -265,6 +265,17 @@ if ($ADMIN->fulltree) {
     );
     $settings->add($viewrecordings);
 
+    // Pooled-hosts feature: recording retention. When set, the
+    // purge_recordings task trashes cloud recordings on Zoom and removes
+    // them from Moodle this many days after the session. 0 disables.
+    $settings->add(new admin_setting_configtext(
+        'zoom/recordingretentiondays',
+        new lang_string('recordingretentiondays', 'mod_zoom'),
+        new lang_string('recordingretentiondays_help', 'mod_zoom'),
+        0,
+        PARAM_INT
+    ));
+
     // Adding options for the display name using uname parameter in zoom join_url.
     $options = [
         'fullname' => get_string('displayfullname', 'mod_zoom'),
