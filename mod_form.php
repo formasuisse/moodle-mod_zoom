@@ -261,11 +261,14 @@ class mod_zoom_mod_form extends moodleform_mod {
         // Validation in validation(). Default to one hour.
         $mform->setDefault('duration', ['number' => 1, 'timeunit' => 3600]);
         // Pooled-hosts feature: the slot picker and the end-of-session task
-        // need a real duration — mark it required in the form (asterisk +
-        // client-side check; the recurring-no-fixed-time case hides the field
-        // via JS, and disabled/hidden fields skip the required rule).
+        // need a real duration — mark it required in the form (asterisk;
+        // enforced server-side in validation()). Server validation only: a
+        // 'client' rule on a group element makes QuickForm emit JS against
+        // getElementById('id_duration'), which does not exist for groups —
+        // the resulting TypeError kills the whole generated validation
+        // script, disabling client-side validation for the entire form.
         if (zoom_pooled_group() !== null) {
-            $mform->addRule('duration', get_string('err_duration_nonpositive', 'zoom'), 'required', null, 'client');
+            $mform->addRule('duration', get_string('err_duration_nonpositive', 'zoom'), 'required', null, 'server');
         }
         // Duration needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
         // Moved this control to javascript, rather than using disabledIf.
