@@ -96,7 +96,10 @@ if (empty($recordings)) {
                 }
 
                 if (empty($recordingpasscode)) {
-                    $recordingpasscode = $recording->passcode;
+                    // Passcode is nullable in the DB (recordings without a
+                    // passcode) — htmlspecialchars(null) is deprecated on
+                    // PHP 8.1+ and renders a debug notice on this page.
+                    $recordingpasscode = $recording->passcode ?? '';
                 }
 
                 if ($iszoommanager && empty($recordingshowhtml)) {
