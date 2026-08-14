@@ -1614,6 +1614,38 @@ class webservice {
     }
 
     /**
+     * Get a meeting's full recordings response: per-file URLs, the passcode
+     * and its URL-safe play token (recording_play_passcode).
+     *
+     * Pooled-hosts feature. Zoom re-mints every link field on each call (old
+     * mints stay valid), so the play token must be paired with URLs taken
+     * from the SAME response — callers should store this response's URLs,
+     * not the user-level listing's.
+     *
+     * @param string $meetinguuid The UUID of a meeting with recordings.
+     * @return stdClass The meeting's recordings response.
+     */
+    public function get_meeting_recording_data($meetinguuid) {
+        // Granular: cloud_recording:read:list_recording_files:admin.
+        $url = 'meetings/' . $this->encode_uuid($meetinguuid) . '/recordings';
+        return $this->make_call($url);
+    }
+
+    /**
+     * Move all of a meeting's recordings to the Zoom trash (recoverable for
+     * 30 days in the portal).
+     *
+     * Pooled-hosts feature: retention enforcement (recordingretentiondays).
+     *
+     * @param string $meetinguuid The UUID of a meeting with recordings.
+     * @return void
+     */
+    public function delete_meeting_recordings($meetinguuid) {
+        $url = 'meetings/' . $this->encode_uuid($meetinguuid) . '/recordings?action=trash';
+        $this->make_call($url, null, 'delete');
+    }
+
+    /**
      * Returns whether or not the current user is permitted to create a meeting/webinar that requires registration.
      * @return boolean
      */

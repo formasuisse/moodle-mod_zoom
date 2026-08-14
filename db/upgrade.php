@@ -1042,5 +1042,23 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026081300, 'zoom');
     }
 
+    if ($oldversion < 2026081401) {
+        // Pooled-hosts feature: one-click recording links (play token) and
+        // retention purge marker.
+        $table = new xmldb_table('zoom_meeting_recordings');
+        $field = new xmldb_field('playpasscode', XMLDB_TYPE_CHAR, '255', null, null, null, null, 'passcode');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        $field = new xmldb_field('timepurged', XMLDB_TYPE_INTEGER, '12', null, null, null, null, 'playpasscode');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Zoom savepoint reached.
+        upgrade_mod_savepoint(true, 2026081401, 'zoom');
+    }
+
     return true;
 }
