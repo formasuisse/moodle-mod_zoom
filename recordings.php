@@ -153,10 +153,13 @@ if (empty($recordings)) {
                 $recordinglinkhtml = html_writer::span($recordinglink, 'recording-link', ['style' => 'margin-right:1rem']);
                 $recordinghtml .= html_writer::div($recordinglinkhtml, 'recording', ['style' => 'margin-bottom:.5rem']);
 
-                // Availability column: until recordingstart +
+                // Availability column: until recordingstart + the effective
+                // retention — the activity override when set, else
                 // zoom/recordingretentiondays (all files of a session share
-                // the same clock).
-                $retentiondays = (int) get_config('zoom', 'recordingretentiondays');
+                // the same clock). Override 0 = kept indefinitely: no date.
+                $retentiondays = isset($zoom->recordingretention)
+                    ? (int) $zoom->recordingretention
+                    : (int) get_config('zoom', 'recordingretentiondays');
                 if ($retentiondays > 0 && empty($availabilitycell)) {
                     $until = userdate($recording->recordingstart + ($retentiondays * DAYSECS), get_string('strftimedate', 'core_langconfig'));
                     $availabilitycell = get_string('recording_available_until', 'mod_zoom', $until);

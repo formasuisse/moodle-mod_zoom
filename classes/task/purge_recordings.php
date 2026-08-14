@@ -58,12 +58,6 @@ class purge_recordings extends scheduled_task {
     public function execute() {
         global $DB;
 
-        $days = get_config('zoom', 'recordingretentiondays');
-        if (empty($days)) {
-            mtrace('Recording retention disabled (recordingretentiondays is 0/unset)...skipping');
-            return;
-        }
-
         try {
             $service = zoom_webservice();
         } catch (moodle_exception $exception) {
@@ -71,14 +65,23 @@ class purge_recordings extends scheduled_task {
             return;
         }
 
-        $cutoff = time() - ((int) $days * DAYSECS);
-        $expired = $DB->get_records_select(
-            'zoom_meeting_recordings',
-            'recordingstart < :cutoff AND (timepurged IS NULL OR timepurged = 0)',
-            ['cutoff' => $cutoff]
+        // Effective retention per recording: the activity's override
+        // (zoom.recordingretention) when set, else the site value. 0/unset
+        // means never purge. LEFT JOIN: rows whose activity was deleted
+        // (delete_instance keeps recordings rows) fall back to the site
+        // value instead of escaping the purge forever.
+        $sitedays = (int) get_config('zoom', 'recordingretentiondays');
+        $expired = $DB->get_records_sql(
+            'SELECT r.*, COALESCE(z.recordingretention, :sitedays1) AS effectivedays
+               FROM {zoom_meeting_recordings} r
+          LEFT JOIN {zoom} z ON z.id = r.zoomid
+              WHERE (r.timepurged IS NULL OR r.timepurged = 0)
+                AND COALESCE(z.recordingretention, :sitedays2) > 0
+                AND r.recordingstart < :now - COALESCE(z.recordingretention, :sitedays3) * :daysecs',
+            ['sitedays1' => $sitedays, 'sitedays2' => $sitedays, 'sitedays3' => $sitedays, 'now' => time(), 'daysecs' => DAYSECS]
         );
         if (empty($expired)) {
-            mtrace('No recordings past the ' . $days . '-day retention window.');
+            mtrace('No recordings past their retention window (site default ' . $sitedays . ' days).');
             return;
         }
 
