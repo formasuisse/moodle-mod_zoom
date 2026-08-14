@@ -25,8 +25,8 @@
 defined('MOODLE_INTERNAL') || die();
 
 $plugin->component = 'mod_zoom';
-$plugin->version = 2026081400;
-$plugin->release = 'v5.5.0-formasuisse-pooled.2';
+$plugin->version = 2026081401;
+$plugin->release = 'v5.5.0-formasuisse-pooled.3';
 $plugin->requires = 2019052000;
 $plugin->maturity = MATURITY_STABLE;
 $plugin->cron = 0;
