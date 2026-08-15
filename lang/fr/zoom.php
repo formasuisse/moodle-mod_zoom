@@ -49,6 +49,14 @@ $string['recordingretentiondays_help'] = 'Si défini, les enregistrements cloud 
 $string['recordingretention'] = 'Conservation des enregistrements (jours, vide = valeur du site : {$a})';
 $string['recordingretention_help'] = 'Nombre de jours après la séance pendant lesquels les enregistrements cloud de cette activité restent disponibles avant d\'être purgés. Laissez vide pour utiliser la valeur par défaut du site. Indiquez un nombre plus grand pour conserver les enregistrements plus longtemps (p. ex. jusqu\'à une date d\'examen), plus petit pour purger plus tôt, ou 0 pour les conserver indéfiniment.';
 $string['err_recordingretention'] = 'La durée de conservation doit être vide (valeur du site) ou un nombre entier de jours.';
+// Correction of a community-pack string (not an added string): the AMOS
+// French pack renders "Active Speaker" — the video view following whoever
+// speaks — as "Haut-parleur actif" (= loudspeaker), which reads as a second
+// audio file next to "Audio uniquement". Zoom's own French client says
+// "Intervenant actif". NOTE: an installed AMOS pack overrides plugin lang/fr,
+// so sites with a French pack in langotherroot still need a fr_local
+// override until the fix lands in AMOS.
+$string['recordingtype_active_speaker'] = 'Intervenant actif';
 $string['recording_available_until'] = 'Disponible jusqu\'au {$a}';
 $string['recording_expired'] = 'n\'est plus disponible';
 $string['recording_expired_long'] = 'Cet enregistrement n\'est plus disponible : la période de conservation est terminée.';
