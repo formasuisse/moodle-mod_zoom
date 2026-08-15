@@ -98,7 +98,10 @@ if (empty($recordings)) {
             // Or if visible to students.
             if ($iszoommanager || intval($recording->showrecording) === 1) {
                 if (empty($recordingdate)) {
-                    $recordingdate = date('F j, Y, g:i:s a \P\T', $recording->recordingstart);
+                    // Upstream hardcoded a US-English format with a literal
+                    // "PT" suffix regardless of the actual timezone; render
+                    // in the viewing user's timezone and locale instead.
+                    $recordingdate = userdate($recording->recordingstart);
                 }
 
                 // Pooled-hosts feature: rows with a play token embed the
