@@ -142,10 +142,10 @@ class end_of_session extends \core\task\adhoc_task {
                 $hostuser = zoom_get_user($zoom->host_id);
                 if (
                     $hostuser
-                    && ($hostuser->first_name ?? '') === $stash->setfirst
-                    && ($hostuser->last_name ?? '') === $stash->setlast
+                    && isset($stash->setdisplay)
+                    && ($hostuser->display_name ?? '') === $stash->setdisplay
                 ) {
-                    $service->update_user_name($zoom->host_id, $stash->prevfirst, $stash->prevlast);
+                    $service->update_user_display_name($zoom->host_id, $stash->prevdisplay);
                 }
             } catch (\moodle_exception $error) {
                 debugging('mod_zoom pooled name restore failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
