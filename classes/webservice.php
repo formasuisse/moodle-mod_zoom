@@ -617,23 +617,6 @@ class webservice {
     }
 
     /**
-     * Update a Zoom user's first/last name.
-     *
-     * Pooled-hosts feature: only used to restore legacy (pre-pooled.6)
-     * rename stashes that recorded first/last instead of display_name.
-     *
-     * @param string $zoomuserid The Zoom user ID.
-     * @param string $firstname New first name.
-     * @param string $lastname New last name.
-     * @return void
-     */
-    public function update_user_name($zoomuserid, $firstname, $lastname) {
-        // Classic: user:write:admin.
-        // Granular: user:update:user:admin.
-        $this->make_call("users/$zoomuserid", ['first_name' => $firstname, 'last_name' => $lastname], 'patch');
-    }
-
-    /**
      * Gets a user's settings.
      *
      * @param string $userid The user's ID.

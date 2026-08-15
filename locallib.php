@@ -1575,11 +1575,10 @@ function zoom_pooled_pick_host($zoom, $context = null) {
 }
 
 /**
- * Apply the host-name templates before a pooled session start, with CAS stash.
+ * Apply the host-name template before a pooled session start, with CAS stash.
  *
- * Pooled-hosts feature. Renders zoom/hostfirstnametemplate and
- * zoom/hostlastnametemplate (placeholders %first/%last from the teacher's
- * Moodle name), joins them into a display name, and patches the pool host's
+ * Pooled-hosts feature. Renders zoom/hostdisplaynametemplate (placeholders
+ * %first/%last from the teacher's Moodle name) and patches the pool host's
  * display_name — the field Zoom actually shows in meetings. First/last name
  * are left untouched: Zoom resets display_name to "first last" whenever
  * first/last are patched, so writing them would fight this. The (previous,
@@ -1596,9 +1595,8 @@ function zoom_pooled_pick_host($zoom, $context = null) {
 function zoom_pooled_apply_rename($zoom, $teacher) {
     global $DB;
 
-    $firsttemplate = trim((string) get_config('zoom', 'hostfirstnametemplate'));
-    $lasttemplate = trim((string) get_config('zoom', 'hostlastnametemplate'));
-    if ($firsttemplate === '' && $lasttemplate === '') {
+    $template = trim((string) get_config('zoom', 'hostdisplaynametemplate'));
+    if ($template === '') {
         return;
     }
 
@@ -1608,11 +1606,8 @@ function zoom_pooled_apply_rename($zoom, $teacher) {
             return;
         }
 
-        $setfirst = str_replace(['%first', '%last'], [$teacher->firstname, $teacher->lastname],
-            $firsttemplate !== '' ? $firsttemplate : '%first');
-        $setlast = str_replace(['%first', '%last'], [$teacher->firstname, $teacher->lastname],
-            $lasttemplate !== '' ? $lasttemplate : '%last');
-        $setdisplay = trim($setfirst . ' ' . $setlast);
+        $setdisplay = trim(str_replace(['%first', '%last'],
+            [$teacher->firstname, $teacher->lastname], $template));
         if ($setdisplay === '') {
             return;
         }

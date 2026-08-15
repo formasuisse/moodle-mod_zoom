@@ -144,14 +144,11 @@ class end_of_session extends \core\task\adhoc_task {
                     if (($hostuser->display_name ?? '') === $stash->setdisplay) {
                         $service->update_user_display_name($zoom->host_id, $stash->prevdisplay);
                     }
-                } else if (
-                    // Legacy (pre-pooled.6) stash: first/last were patched.
-                    $hostuser
-                    && isset($stash->setfirst)
-                    && ($hostuser->first_name ?? '') === $stash->setfirst
-                    && ($hostuser->last_name ?? '') === $stash->setlast
-                ) {
-                    $service->update_user_name($zoom->host_id, $stash->prevfirst, $stash->prevlast);
+                } else if ($hostuser && isset($stash->prevfirst)) {
+                    // Stash without a display name (pre-pooled.6): reset the
+                    // display name to the stashed first/last.
+                    $service->update_user_display_name($zoom->host_id,
+                        trim($stash->prevfirst . ' ' . $stash->prevlast));
                 }
             } catch (\moodle_exception $error) {
                 debugging('mod_zoom pooled name restore failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
