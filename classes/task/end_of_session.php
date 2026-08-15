@@ -140,8 +140,14 @@ class end_of_session extends \core\task\adhoc_task {
         if ($stash) {
             try {
                 $hostuser = zoom_get_user($zoom->host_id);
-                if (
+                if ($hostuser && isset($stash->setdisplay)) {
+                    if (($hostuser->display_name ?? '') === $stash->setdisplay) {
+                        $service->update_user_display_name($zoom->host_id, $stash->prevdisplay);
+                    }
+                } else if (
+                    // Legacy (pre-pooled.6) stash: first/last were patched.
                     $hostuser
+                    && isset($stash->setfirst)
                     && ($hostuser->first_name ?? '') === $stash->setfirst
                     && ($hostuser->last_name ?? '') === $stash->setlast
                 ) {

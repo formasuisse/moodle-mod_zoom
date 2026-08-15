@@ -1579,11 +1579,15 @@ function zoom_pooled_pick_host($zoom, $context = null) {
  *
  * Pooled-hosts feature. Renders zoom/hostfirstnametemplate and
  * zoom/hostlastnametemplate (placeholders %first/%last from the teacher's
- * Moodle name) onto the pool host, stashing (previous, set) on the zoom
- * record so the end-of-session task can restore compare-and-swap style: it
- * only restores while the current name still equals what we set — any other
- * value means someone renamed out of band, hands off. Rename failures are
- * swallowed — a class start is never blocked over a display name.
+ * Moodle name), joins them into a display name, and patches the pool host's
+ * display_name — the field Zoom actually shows in meetings. First/last name
+ * are left untouched: Zoom resets display_name to "first last" whenever
+ * first/last are patched, so writing them would fight this. The (previous,
+ * set) display name is stashed on the zoom record so the end-of-session task
+ * can restore compare-and-swap style: it only restores while the current
+ * display name still equals what we set — any other value means someone
+ * renamed out of band, hands off. Rename failures are swallowed — a class
+ * start is never blocked over a display name.
  *
  * @param stdClass $zoom The zoom activity record.
  * @param stdClass $teacher The Moodle user record of the teacher.
@@ -1608,15 +1612,17 @@ function zoom_pooled_apply_rename($zoom, $teacher) {
             $firsttemplate !== '' ? $firsttemplate : '%first');
         $setlast = str_replace(['%first', '%last'], [$teacher->firstname, $teacher->lastname],
             $lasttemplate !== '' ? $lasttemplate : '%last');
+        $setdisplay = trim($setfirst . ' ' . $setlast);
+        if ($setdisplay === '') {
+            return;
+        }
 
         $DB->set_field('zoom', 'poolrename', json_encode([
-            'prevfirst' => $hostuser->first_name ?? '',
-            'prevlast' => $hostuser->last_name ?? '',
-            'setfirst' => $setfirst,
-            'setlast' => $setlast,
+            'prevdisplay' => $hostuser->display_name ?? '',
+            'setdisplay' => $setdisplay,
         ]), ['id' => $zoom->id]);
 
-        zoom_webservice()->update_user_name($zoom->host_id, $setfirst, $setlast);
+        zoom_webservice()->update_user_display_name($zoom->host_id, $setdisplay);
     } catch (moodle_exception $error) {
         debugging('mod_zoom pooled rename failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
     }
@@ -1632,6 +1638,11 @@ function zoom_pooled_apply_rename($zoom, $teacher) {
 function zoom_get_user_display_name($zoomuserid) {
     try {
         $hostuser = zoom_get_user($zoomuserid);
+
+        // Prefer the profile display name — the field Zoom actually shows.
+        if (!empty($hostuser->display_name)) {
+            return $hostuser->display_name;
+        }
 
         // Compose Moodle user object for host.
         $hostmoodleuser = new stdClass();

@@ -601,7 +601,26 @@ class webservice {
      * Update a Zoom user's display name.
      *
      * Pooled-hosts feature: applies/restores the hostnametemplate
-     * rename around a pooled session.
+     * rename around a pooled session. Patches display_name — the field
+     * Zoom actually shows in meetings — and leaves first/last name alone.
+     * (Zoom resets display_name to "first last" on any first/last patch,
+     * so touching those would clobber this.)
+     *
+     * @param string $zoomuserid The Zoom user ID.
+     * @param string $displayname New display name.
+     * @return void
+     */
+    public function update_user_display_name($zoomuserid, $displayname) {
+        // Classic: user:write:admin.
+        // Granular: user:update:user:admin.
+        $this->make_call("users/$zoomuserid", ['display_name' => $displayname], 'patch');
+    }
+
+    /**
+     * Update a Zoom user's first/last name.
+     *
+     * Pooled-hosts feature: only used to restore legacy (pre-pooled.6)
+     * rename stashes that recorded first/last instead of display_name.
      *
      * @param string $zoomuserid The Zoom user ID.
      * @param string $firstname New first name.
