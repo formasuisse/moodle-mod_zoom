@@ -49,6 +49,7 @@
         <FIELD NAME="registration" TYPE="int" LENGTH="1" NOTNULL="true" DEFAULT="2" SEQUENCE="false" COMMENT="Force participants to register for the meeting/webinar"/>
         <FIELD NAME="teacherid" TYPE="int" LENGTH="10" NOTNULL="false" SEQUENCE="false" COMMENT="Pooled-hosts feature: Moodle user id of the teacher for this meeting (decoupled from the Zoom host)."/>
         <FIELD NAME="poolrename" TYPE="text" NOTNULL="false" SEQUENCE="false" COMMENT="Pooled-hosts feature: JSON stash {prevfirst,prevlast,setfirst,setlast} of the pool host rename, for CAS restore on session end."/>
+        <FIELD NAME="recordingretention" TYPE="int" LENGTH="6" NOTNULL="false" SEQUENCE="false" COMMENT="Pooled-hosts feature: per-activity recording retention override in days. Null = inherit zoom/recordingretentiondays, 0 = never purge."/>
       </FIELDS>
       <KEYS>
         <KEY NAME="primary" TYPE="primary" FIELDS="id"/>

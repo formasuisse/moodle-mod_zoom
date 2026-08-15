@@ -865,6 +865,18 @@ class mod_zoom_mod_form extends moodleform_mod {
             );
             $mform->setDefault('recordings_visible_default', 1);
             $mform->addHelpButton('recordings_visible_default', 'recordingvisibility', 'mod_zoom');
+
+            // Pooled-hosts feature: per-activity retention override. Empty
+            // inherits the site value; PARAM_INT would collapse '' to 0
+            // (= never purge), so keep the raw string until postprocessing.
+            $mform->addElement(
+                'text',
+                'recordingretention',
+                get_string('recordingretention', 'mod_zoom', (int) get_config('zoom', 'recordingretentiondays')),
+                ['size' => 4]
+            );
+            $mform->setType('recordingretention', PARAM_RAW_TRIMMED);
+            $mform->addHelpButton('recordingretention', 'recordingretention', 'mod_zoom');
         }
 
         // Add meeting id.
@@ -978,6 +990,13 @@ class mod_zoom_mod_form extends moodleform_mod {
         global $DB;
 
         parent::data_postprocessing($data);
+
+        // Pooled-hosts feature: retention override — empty string means
+        // "inherit the site value" and must be stored as NULL, not 0
+        // (0 means never purge).
+        if (isset($data->recordingretention)) {
+            $data->recordingretention = ($data->recordingretention === '') ? null : (int) $data->recordingretention;
+        }
 
         // Get config.
         $config = get_config('zoom');
@@ -1125,6 +1144,14 @@ class mod_zoom_mod_form extends moodleform_mod {
         $errors = parent::validation($data, $files);
 
         $config = get_config('zoom');
+
+        // Pooled-hosts feature: retention override must be empty (inherit)
+        // or a whole number of days.
+        if (isset($data['recordingretention']) && $data['recordingretention'] !== '') {
+            if (!ctype_digit((string) $data['recordingretention'])) {
+                $errors['recordingretention'] = get_string('err_recordingretention', 'mod_zoom');
+            }
+        }
 
         // Only check for scheduled meetings.
         if (empty($data['recurring'])) {

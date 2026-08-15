@@ -46,6 +46,9 @@ $string['zoomerr_registration_dropped'] = 'Zoom a accepté l\'enregistrement mai
 $string['purgerecordings'] = 'Purger les enregistrements Zoom expirés';
 $string['recordingretentiondays'] = 'Durée de conservation des enregistrements (jours)';
 $string['recordingretentiondays_help'] = 'Si défini, les enregistrements cloud sont déplacés vers la corbeille Zoom et retirés de Moodle ce nombre de jours après la séance — tout lien de visionnage partagé cesse alors de fonctionner. 0 désactive la purge.';
+$string['recordingretention'] = 'Conservation des enregistrements (jours, vide = valeur du site : {$a})';
+$string['recordingretention_help'] = 'Nombre de jours après la séance pendant lesquels les enregistrements cloud de cette activité restent disponibles avant d\'être purgés. Laissez vide pour utiliser la valeur par défaut du site. Indiquez un nombre plus grand pour conserver les enregistrements plus longtemps (p. ex. jusqu\'à une date d\'examen), plus petit pour purger plus tôt, ou 0 pour les conserver indéfiniment.';
+$string['err_recordingretention'] = 'La durée de conservation doit être vide (valeur du site) ou un nombre entier de jours.';
 // Correction of a community-pack string (not an added string): the AMOS
 // French pack renders "Active Speaker" — the video view following whoever
 // speaks — as "Haut-parleur actif" (= loudspeaker), which reads as a second

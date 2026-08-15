@@ -1060,5 +1060,18 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026081401, 'zoom');
     }
 
+    if ($oldversion < 2026081402) {
+        // Pooled-hosts feature: per-activity recording retention override
+        // (null = inherit zoom/recordingretentiondays, 0 = never purge).
+        $table = new xmldb_table('zoom');
+        $field = new xmldb_field('recordingretention', XMLDB_TYPE_INTEGER, '6', null, null, null, null, 'poolrename');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        // Zoom savepoint reached.
+        upgrade_mod_savepoint(true, 2026081402, 'zoom');
+    }
+
     return true;
 }
