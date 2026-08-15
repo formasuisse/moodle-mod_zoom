@@ -81,7 +81,7 @@ class purge_recordings extends scheduled_task {
             ['sitedays1' => $sitedays, 'sitedays2' => $sitedays, 'sitedays3' => $sitedays, 'now' => time(), 'daysecs' => DAYSECS]
         );
         if (empty($expired)) {
-            mtrace('No recordings past their retention window (site default ' . $sitedays . ' days).');
+            mtrace('No recordings past their retention window.');
             return;
         }
 
