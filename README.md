@@ -122,10 +122,15 @@ How it works:
 - **Scheduling**: the activity form gains a required Teacher selector (role
   archetypes per `pooledteacherroles`). On save, the plugin picks a pool
   member whose Zoom calendar (including meetings scheduled outside Moodle) is
-  free for the slot ± buffer; the scan starts at a position hashed from the
-  teacher so the same teacher tends to stay on the same pool host. No free
-  host = the save fails (`pool_exhausted`) — that is the capacity signal.
-  Duration is mandatory for scheduled meetings in pooled mode.
+  free for the slot ± buffer — for a recurring series, for **every
+  occurrence's** slot: the recurrence rule is expanded locally (wall-clock in
+  the site timezone, DST-aware), checked in one calendar listing per
+  candidate host, and after create the expansion is re-verified against
+  Zoom's own occurrence list (`recurrence_mismatch` on divergence). The scan
+  starts at a position hashed from the teacher so the same teacher tends to
+  stay on the same pool host. No free host = the save fails
+  (`pool_exhausted`) — that is the capacity signal. Duration is mandatory for
+  scheduled meetings in pooled mode.
 - **Starting**: only the selected teacher sees Start. The click live-checks
   the pool host (`collision_imminent` if it is still in another meeting —
   Zoom allows only one active meeting per host and ends the first when a

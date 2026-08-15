@@ -1475,33 +1475,208 @@ function zoom_pooled_members($context = null) {
 }
 
 /**
- * Whether a candidate pool host has a scheduling conflict for a slot.
+ * Expand a meeting's schedule into concrete occurrence slots.
+ *
+ * Pooled-hosts feature. For a recurring meeting with a fixed schedule this
+ * mirrors Zoom's own recurrence expansion: create_meeting sends the rule plus
+ * $CFG->timezone, and occurrences repeat at the first occurrence's wall-clock
+ * time in that timezone — so the day/week/month stepping here is done in
+ * local time (across a DST switch the epoch interval is deliberately not a
+ * multiple of 24h). When the rule's grid starts before the requested start
+ * (start's weekday not among weekly_days, monthly day already past, ...) the
+ * first slot is the first match at/after the start, matching Zoom. Divergence
+ * from Zoom's actual expansion is a real risk this function accepts — it is
+ * caught after create by zoom_pooled_verify_occurrences().
+ *
+ * @param stdClass $zoom The meeting as built from the form.
+ * @return array[] List of [start (Unix timestamp), duration (seconds)] pairs
+ *                 in start order. Empty when there is nothing to check
+ *                 (no start time, or recurring with no fixed time).
+ */
+function zoom_pooled_expand_occurrences($zoom) {
+    global $CFG;
+
+    $start = (int) ($zoom->start_time ?? 0);
+    $duration = (int) ($zoom->duration ?? 0);
+    if ($duration <= 0) {
+        $duration = HOURSECS;
+    }
+
+    if ($start === 0) {
+        return [];
+    }
+
+    if (empty($zoom->recurring)) {
+        return [[$start, $duration]];
+    }
+
+    $recurrencetype = (int) ($zoom->recurrence_type ?? ZOOM_RECURRINGTYPE_NOTIME);
+    if ($recurrencetype == ZOOM_RECURRINGTYPE_NOTIME) {
+        return [];
+    }
+
+    $interval = max(1, (int) ($zoom->repeat_interval ?? 1));
+
+    // Bound the expansion: Zoom's own occurrence expansion never exceeds this
+    // (its per-rule caps are all lower), so the cap can't hide a real slot.
+    $maxcount = 100;
+    $endday = null;
+    $endsbydate = ($zoom->end_date_option ?? ZOOM_END_DATE_OPTION_AFTER) == ZOOM_END_DATE_OPTION_BY
+        && !empty($zoom->end_date_time);
+    if (!$endsbydate) {
+        $maxcount = min($maxcount, max(1, (int) ($zoom->end_times ?? 1)));
+    }
+
+    // The same timezone create_meeting() sends to Zoom.
+    try {
+        $tz = new DateTimeZone(!empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get());
+    } catch (Exception $e) {
+        $tz = new DateTimeZone(date_default_timezone_get());
+    }
+
+    $first = (new DateTimeImmutable('@' . $start))->setTimezone($tz);
+    if ($endsbydate) {
+        // The end date is a calendar date in the meeting timezone, inclusive.
+        $endday = (new DateTimeImmutable('@' . (int) $zoom->end_date_time))->setTimezone($tz)->setTime(23, 59, 59);
+    }
+
+    $timeofday = [(int) $first->format('H'), (int) $first->format('i'), (int) $first->format('s')];
+    $slots = [];
+    // Collects a candidate occurrence; false = expansion finished.
+    $push = function (DateTimeImmutable $dt) use (&$slots, $first, $endday, $maxcount, $duration) {
+        if ($dt < $first) {
+            return true;
+        }
+
+        if ($endday !== null && $dt > $endday) {
+            return false;
+        }
+
+        $slots[] = [$dt->getTimestamp(), $duration];
+        return count($slots) < $maxcount;
+    };
+
+    switch ($recurrencetype) {
+        case ZOOM_RECURRINGTYPE_DAILY:
+            for ($dt = $first; $push($dt); $dt = $dt->modify('+' . $interval . ' day')) {
+                continue;
+            }
+            break;
+
+        case ZOOM_RECURRINGTYPE_WEEKLY:
+            // Zoom day numbering throughout: 1=Sunday .. 7=Saturday.
+            $days = array_values(array_filter(array_map('intval', explode(',', (string) ($zoom->weekly_days ?? '')))));
+            if (empty($days)) {
+                $days = [(int) $first->format('w') + 1];
+            }
+
+            sort($days);
+            // The week grid is anchored on the Sunday of the start's week.
+            $anchor = $first->modify('-' . (int) $first->format('w') . ' day');
+            for ($week = 0; true; $week += $interval) {
+                foreach ($days as $day) {
+                    $dt = $anchor->modify('+' . ($week * 7 + $day - 1) . ' day')->setTime(...$timeofday);
+                    if (!$push($dt)) {
+                        break 2;
+                    }
+                }
+            }
+            break;
+
+        case ZOOM_RECURRINGTYPE_MONTHLY:
+            $bymonthday = ($zoom->monthly_repeat_option ?? ZOOM_MONTHLY_REPEAT_OPTION_DAY) == ZOOM_MONTHLY_REPEAT_OPTION_DAY;
+            for ($month = 0; true; $month += $interval) {
+                $monthstart = $first->modify('first day of')->setTime(...$timeofday)->modify('+' . $month . ' month');
+                if ($bymonthday) {
+                    $day = (int) ($zoom->monthly_day ?? $first->format('j'));
+                    if ($day > (int) $monthstart->format('t')) {
+                        // No such day this month (e.g. the 31st) — skip it.
+                        continue;
+                    }
+
+                    $dt = $monthstart->modify('+' . ($day - 1) . ' day');
+                } else {
+                    $dt = zoom_pooled_nth_weekday_of_month(
+                        $monthstart,
+                        (int) ($zoom->monthly_week ?? 1),
+                        (int) ($zoom->monthly_week_day ?? (int) $first->format('w') + 1)
+                    );
+                    if ($dt === null) {
+                        continue;
+                    }
+                }
+
+                if (!$push($dt)) {
+                    break;
+                }
+            }
+            break;
+    }
+
+    return $slots;
+}
+
+/**
+ * The Nth given weekday of a month, or null when the month has no such day.
+ *
+ * @param DateTimeImmutable $monthstart First day of the month, carrying the
+ *        time of day the result should keep.
+ * @param int $week 1-4, or -1 for the last such weekday of the month.
+ * @param int $weekday Zoom day number, 1=Sunday .. 7=Saturday.
+ * @return ?DateTimeImmutable
+ */
+function zoom_pooled_nth_weekday_of_month(DateTimeImmutable $monthstart, $week, $weekday) {
+    $offset = ($weekday - ((int) $monthstart->format('w') + 1) + 7) % 7;
+    if ($week == -1) {
+        $dt = $monthstart->modify('+' . $offset . ' day');
+        while ((int) $dt->modify('+7 day')->format('n') == (int) $monthstart->format('n')) {
+            $dt = $dt->modify('+7 day');
+        }
+
+        return $dt;
+    }
+
+    $dt = $monthstart->modify('+' . ($offset + ($week - 1) * 7) . ' day');
+    return ((int) $dt->format('n') == (int) $monthstart->format('n')) ? $dt : null;
+}
+
+/**
+ * Whether a candidate pool host has a scheduling conflict with any slot.
  *
  * Pooled-hosts feature. Checks the host's complete Zoom calendar
- * (includes meetings scheduled outside Moodle) against the slot, requiring
- * zoom/slotbuffer minutes of gap on both sides. Meetings without a start time
- * (recurring with no fixed time) cannot be evaluated and are ignored.
+ * (includes meetings scheduled outside Moodle) against every slot, requiring
+ * zoom/slotbuffer minutes of gap on both sides. The calendar is fetched once
+ * over a window spanning all slots — O(1) API calls per host regardless of
+ * how many occurrences a series has. Meetings without a start time (recurring
+ * with no fixed time) cannot be evaluated and are ignored.
  * NB Zoom itself accepts overlapping schedules — only runtime enforces
  * one-active-meeting (T12) — so this check is the only scheduling-time guard.
  *
  * @param string $zoomuserid Candidate pool host.
- * @param int $start Slot start (Unix timestamp).
- * @param int $duration Slot duration (seconds).
- * @param ?int $excludemeetingid Meeting ID to ignore (when revalidating an existing meeting).
+ * @param array $slots [start (Unix timestamp), duration (seconds)] pairs,
+ *        as produced by zoom_pooled_expand_occurrences().
+ * @param ?int $excludemeetingid Meeting ID to ignore (when revalidating an
+ *        existing meeting; matches every occurrence of that series).
  * @return bool
  */
-function zoom_pooled_slot_conflicts($zoomuserid, $start, $duration, $excludemeetingid = null) {
-    $bufferseconds = ((int) get_config('zoom', 'slotbuffer') ?: 15) * MINSECS;
-    $slotstart = $start - $bufferseconds;
-    $slotend = $start + $duration + $bufferseconds;
+function zoom_pooled_slots_conflict($zoomuserid, array $slots, $excludemeetingid = null) {
+    if (empty($slots)) {
+        return false;
+    }
 
-    // Bound the listing server-side to the day(s) around the slot. UTC dates
+    $bufferseconds = ((int) get_config('zoom', 'slotbuffer') ?: 15) * MINSECS;
+    $intervals = [];
+    foreach ($slots as $slot) {
+        $intervals[] = [$slot[0] - $bufferseconds, $slot[0] + $slot[1] + $bufferseconds];
+    }
+
+    // Bound the listing server-side to the day(s) around the slots. UTC dates
     // on purpose: Zoom interprets from/to as dates, and the one-day padding on
     // each side absorbs any timezone offset between UTC and the account TZ.
     // The overlap math itself is all epoch-based (Zoom start_time is ISO8601
     // UTC, strtotime handles the Z suffix), so only these bounds involve dates.
-    $from = gmdate('Y-m-d', $slotstart - DAYSECS);
-    $to = gmdate('Y-m-d', $slotend + DAYSECS);
+    $from = gmdate('Y-m-d', min(array_column($intervals, 0)) - DAYSECS);
+    $to = gmdate('Y-m-d', max(array_column($intervals, 1)) + DAYSECS);
 
     foreach (zoom_webservice()->get_user_upcoming_meetings($zoomuserid, $from, $to) as $meeting) {
         if ($excludemeetingid !== null && (string) $meeting->id === (string) $excludemeetingid) {
@@ -1514,12 +1689,60 @@ function zoom_pooled_slot_conflicts($zoomuserid, $start, $duration, $excludemeet
 
         $otherstart = strtotime($meeting->start_time);
         $otherend = $otherstart + (($meeting->duration ?? 60) * MINSECS);
-        if ($otherstart < $slotend && $otherend > $slotstart) {
-            return true;
+        foreach ($intervals as $interval) {
+            if ($otherstart < $interval[1] && $otherend > $interval[0]) {
+                return true;
+            }
         }
     }
 
     return false;
+}
+
+/**
+ * Tripwire: compare Zoom's actual occurrence expansion against the local one.
+ *
+ * Pooled-hosts feature. zoom_pooled_pick_host() clears a series against a
+ * host using zoom_pooled_expand_occurrences(); if Zoom expands the same rule
+ * differently (DST edge, first-occurrence semantics, ...) that check ran
+ * against the wrong slots. Any difference fires recurrence_mismatch —
+ * routable to ops like the other pool events. The meeting stands; this is
+ * detection, not rollback.
+ *
+ * @param stdClass $zoom Meeting record (populated from the create response).
+ * @param array $occurrences Zoom's occurrence objects; start_time may already
+ *        be normalised to a Unix timestamp (populate_zoom_from_response).
+ * @param ?context $context Module context for the event (system if null).
+ * @return void
+ */
+function zoom_pooled_verify_occurrences($zoom, array $occurrences, $context = null) {
+    $expected = array_column(zoom_pooled_expand_occurrences($zoom), 0);
+    $actual = [];
+    foreach ($occurrences as $occurrence) {
+        if (($occurrence->status ?? '') === 'deleted') {
+            continue;
+        }
+
+        $actual[] = is_numeric($occurrence->start_time) ? (int) $occurrence->start_time : strtotime($occurrence->start_time);
+    }
+
+    sort($expected);
+    sort($actual);
+    if ($expected === $actual) {
+        return;
+    }
+
+    $diff = array_merge(array_diff($expected, $actual), array_diff($actual, $expected));
+    \mod_zoom\event\recurrence_mismatch::create([
+        'context' => $context ?? context_system::instance(),
+        'other' => [
+            'meetingid' => (int) $zoom->meeting_id,
+            'hostid' => $zoom->host_id,
+            'expected' => count($expected),
+            'actual' => count($actual),
+            'firstdiff' => empty($diff) ? 0 : min($diff),
+        ],
+    ])->trigger();
 }
 
 /**
@@ -1556,20 +1779,25 @@ function zoom_pooled_pick_host($zoom, $context = null) {
         $members = array_merge(array_slice($members, $offset), array_slice($members, 0, $offset));
     }
 
-    // Recurring-no-fixed-time meetings have no slot to check — first member wins.
-    $start = (int) ($zoom->start_time ?? 0);
-    $duration = (int) ($zoom->duration ?? 0);
+    // Every occurrence of the series must fit on the same host: expand the
+    // schedule into concrete slots. Empty = nothing to check (recurring with
+    // no fixed time) — first member wins.
+    $slots = zoom_pooled_expand_occurrences($zoom);
     $exclude = !empty($zoom->meeting_id) && $zoom->meeting_id != -1 ? $zoom->meeting_id : null;
 
     foreach ($members as $member) {
-        if ($start === 0 || !zoom_pooled_slot_conflicts($member->id, $start, $duration, $exclude)) {
+        if (empty($slots) || !zoom_pooled_slots_conflict($member->id, $slots, $exclude)) {
             return $member->id;
         }
     }
 
     \mod_zoom\event\pool_exhausted::create([
         'context' => $context ?? context_system::instance(),
-        'other' => ['start' => $start, 'duration' => $duration],
+        'other' => [
+            'start' => (int) ($zoom->start_time ?? 0),
+            'duration' => (int) ($zoom->duration ?? 0),
+            'occurrences' => count($slots),
+        ],
     ])->trigger();
     throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
 }

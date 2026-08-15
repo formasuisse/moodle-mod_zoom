@@ -129,6 +129,13 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
         throw new moodle_exception('erroraddinstance', 'zoom', $redirecturl->out());
     }
 
+    // Pooled-hosts feature: tripwire — the pool pick validated the slots from
+    // a local expansion of the recurrence rule; verify Zoom expanded it into
+    // the same occurrences (recurrence_mismatch event when not).
+    if (zoom_pooled_group() !== null && !empty($response->occurrences)) {
+        zoom_pooled_verify_occurrences($zoom, $response->occurrences, $pooledcontext ?? null);
+    }
+
     $zoom->id = $DB->insert_record('zoom', $zoom);
     if (!empty($zoom->breakoutrooms)) {
         // We ignore the API response and save the local data for breakout rooms to support dynamic users and groups.
@@ -193,13 +200,14 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
     $zoom->meeting_id = $updatedzoomrecord->meeting_id;
     $zoom->webinar = $updatedzoomrecord->webinar;
 
-    // Pooled-hosts feature: revalidate the (kept) pool host's slot on
-    // reschedule — Zoom accepts overlapping schedules, this is the only guard.
+    // Pooled-hosts feature: revalidate the (kept) pool host's slots on
+    // reschedule — every occurrence of a recurring series, not just the
+    // first — Zoom accepts overlapping schedules, this is the only guard.
     if (zoom_pooled_group() !== null) {
         unset($zoom->schedule_for);
         if (
             !empty($zoom->start_time)
-            && zoom_pooled_slot_conflicts($zoom->host_id, $zoom->start_time, $zoom->duration ?? HOURSECS, $zoom->meeting_id)
+            && zoom_pooled_slots_conflict($zoom->host_id, zoom_pooled_expand_occurrences($zoom), $zoom->meeting_id)
         ) {
             throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
         }

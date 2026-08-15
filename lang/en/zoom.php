@@ -217,6 +217,7 @@ $string['event_collision_imminent'] = 'Zoom host collision imminent';
 $string['event_overrun_detected'] = 'Zoom session overrun detected';
 $string['event_pool_exhausted'] = 'Zoom host pool exhausted';
 $string['event_pool_misconfigured'] = 'Zoom host pool misconfigured';
+$string['event_recurrence_mismatch'] = 'Zoom recurrence expansion mismatch';
 $string['event_registration_dropped'] = 'Zoom registration settings dropped';
 $string['joinbeforehost'] = 'Join meeting before host';
 $string['joinbeforehostenable'] = 'Allow participants to join anytime';
