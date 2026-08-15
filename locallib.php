@@ -1700,36 +1700,54 @@ function zoom_pooled_slots_conflict($zoomuserid, array $slots, $excludemeetingid
 }
 
 /**
+ * Concrete slots from Zoom's own occurrence list.
+ *
+ * Pooled-hosts feature. Input must be populate_zoom_from_response()-normalised
+ * occurrence objects (start_time as Unix timestamp, duration in seconds).
+ *
+ * @param stdClass $zoom Meeting record (for the series duration fallback).
+ * @param array $occurrences Normalised occurrence objects.
+ * @return array[] [start (Unix timestamp), duration (seconds)] pairs.
+ */
+function zoom_pooled_occurrence_slots($zoom, array $occurrences) {
+    $seriesduration = (int) ($zoom->duration ?? 0) ?: HOURSECS;
+    $slots = [];
+    foreach ($occurrences as $occurrence) {
+        if (($occurrence->status ?? '') === 'deleted') {
+            continue;
+        }
+
+        $slots[] = [(int) $occurrence->start_time, (int) ($occurrence->duration ?? 0) ?: $seriesduration];
+    }
+
+    return $slots;
+}
+
+/**
  * Tripwire: compare Zoom's actual occurrence expansion against the local one.
  *
  * Pooled-hosts feature. zoom_pooled_pick_host() clears a series against a
  * host using zoom_pooled_expand_occurrences(); if Zoom expands the same rule
  * differently (DST edge, first-occurrence semantics, ...) that check ran
  * against the wrong slots. Any difference fires recurrence_mismatch —
- * routable to ops like the other pool events. The meeting stands; this is
- * detection, not rollback.
+ * routable to ops like the other pool events — and is reported to the caller,
+ * which may enforce (zoom_add_instance deletes and moves to the next host
+ * when the divergence actually collides).
  *
  * @param stdClass $zoom Meeting record (populated from the create response).
- * @param array $occurrences Zoom's occurrence objects; start_time may already
- *        be normalised to a Unix timestamp (populate_zoom_from_response).
+ * @param array $occurrences Zoom's occurrence objects, normalised by
+ *        populate_zoom_from_response().
  * @param ?context $context Module context for the event (system if null).
- * @return void
+ * @return bool True when Zoom's expansion matches the local one.
  */
 function zoom_pooled_verify_occurrences($zoom, array $occurrences, $context = null) {
     $expected = array_column(zoom_pooled_expand_occurrences($zoom), 0);
-    $actual = [];
-    foreach ($occurrences as $occurrence) {
-        if (($occurrence->status ?? '') === 'deleted') {
-            continue;
-        }
-
-        $actual[] = is_numeric($occurrence->start_time) ? (int) $occurrence->start_time : strtotime($occurrence->start_time);
-    }
+    $actual = array_column(zoom_pooled_occurrence_slots($zoom, $occurrences), 0);
 
     sort($expected);
     sort($actual);
     if ($expected === $actual) {
-        return;
+        return true;
     }
 
     $diff = array_merge(array_diff($expected, $actual), array_diff($actual, $expected));
@@ -1743,6 +1761,7 @@ function zoom_pooled_verify_occurrences($zoom, array $occurrences, $context = nu
             'firstdiff' => empty($diff) ? 0 : min($diff),
         ],
     ])->trigger();
+    return false;
 }
 
 /**
@@ -1754,11 +1773,19 @@ function zoom_pooled_verify_occurrences($zoom, array $occurrences, $context = nu
  *
  * @param stdClass $zoom The meeting as built from the form.
  * @param ?context $context Module/course context for events.
+ * @param array $excludehosts Zoom user IDs to skip (hosts already tried and
+ *        rejected by the post-create authoritative check).
  * @return string The chosen Zoom user ID.
  * @throws moodle_exception When no pool host is free for the slot.
  */
-function zoom_pooled_pick_host($zoom, $context = null) {
+function zoom_pooled_pick_host($zoom, $context = null, array $excludehosts = []) {
     $members = zoom_pooled_members($context);
+
+    if (!empty($excludehosts)) {
+        $members = array_values(array_filter($members, function ($member) use ($excludehosts) {
+            return !in_array($member->id, $excludehosts, true);
+        }));
+    }
 
     // Registration is a licensed-host feature (an unlicensed host's
     // registration settings are silently stripped — T1): registration-bearing

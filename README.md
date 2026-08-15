@@ -121,16 +121,22 @@ How it works:
 
 - **Scheduling**: the activity form gains a required Teacher selector (role
   archetypes per `pooledteacherroles`). On save, the plugin picks a pool
-  member whose Zoom calendar (including meetings scheduled outside Moodle) is
-  free for the slot ± buffer — for a recurring series, for **every
-  occurrence's** slot: the recurrence rule is expanded locally (wall-clock in
-  the site timezone, DST-aware), checked in one calendar listing per
-  candidate host, and after create the expansion is re-verified against
-  Zoom's own occurrence list (`recurrence_mismatch` on divergence). The scan
-  starts at a position hashed from the teacher so the same teacher tends to
-  stay on the same pool host. No free host = the save fails
-  (`pool_exhausted`) — that is the capacity signal. Duration is mandatory for
-  scheduled meetings in pooled mode.
+  member whose Zoom calendar (including meetings scheduled outside Moodle;
+  the listing is per-occurrence and reflects occurrence-level cancels/edits —
+  measured) is free for the slot ± buffer — for a recurring series, for
+  **every occurrence's** slot: the recurrence rule is expanded locally
+  (wall-clock in the site timezone, DST-aware) and checked in one calendar
+  listing per candidate host. Zoom's own expansion stays authoritative:
+  after create it is compared to the local one (`recurrence_mismatch` on
+  divergence) and, if the divergence actually collides on the chosen host,
+  the meeting is deleted and the next pool member tried. On update the slots
+  are revalidated **only when the schedule changed** (an unchanged schedule
+  keeps its already-validated — possibly occurrence-edited — bookings; the
+  rule must not re-claim them), rejecting the save on conflict rather than
+  ever rolling back a live meeting. The scan starts at a position hashed
+  from the teacher so the same teacher tends to stay on the same pool host.
+  No free host = the save fails (`pool_exhausted`) — that is the capacity
+  signal. Duration is mandatory for scheduled meetings in pooled mode.
 - **Starting**: only the selected teacher sees Start. The click live-checks
   the pool host (`collision_imminent` if it is still in another meeting —
   Zoom allows only one active meeting per host and ends the first when a
