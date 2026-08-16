@@ -238,11 +238,35 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
         unset($zoom->schedule_for);
         $newslots = zoom_pooled_expand_occurrences($zoom);
         $schedulechanged = $oldzoom === null || $newslots !== zoom_pooled_expand_occurrences($oldzoom);
-        if (
-            $schedulechanged
-            && zoom_pooled_slots_conflict($zoom->host_id, $newslots, $zoom->meeting_id)
-        ) {
-            throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+        if ($schedulechanged && !empty($newslots)) {
+            // Cancelled occurrences never come back — deletion tombstones
+            // survive even recurrence-rule PATCHes (measured 2026-08-16) —
+            // so their slots are not being re-claimed by this change.
+            // Exclude them, or prolonging a series would falsely reject when
+            // a cancelled slot's freed time was re-booked by another meeting.
+            try {
+                $current = zoom_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
+                $deletedstarts = [];
+                foreach ($current->occurrences ?? [] as $occurrence) {
+                    if (($occurrence->status ?? '') === 'deleted') {
+                        $deletedstarts[] = strtotime($occurrence->start_time);
+                    }
+                }
+
+                if (!empty($deletedstarts)) {
+                    $newslots = array_values(array_filter($newslots, function ($slot) use ($deletedstarts) {
+                        return !in_array($slot[0], $deletedstarts, true);
+                    }));
+                }
+            } catch (moodle_exception $error) {
+                // Tombstone exclusion is an optimisation — check strictly.
+                debugging('mod_zoom pooled: occurrence readback failed, revalidating strictly: '
+                    . $error->getMessage(), DEBUG_DEVELOPER);
+            }
+
+            if (zoom_pooled_slots_conflict($zoom->host_id, $newslots, $zoom->meeting_id)) {
+                throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+            }
         }
     }
 

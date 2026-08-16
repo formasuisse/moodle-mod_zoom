@@ -1741,7 +1741,19 @@ function zoom_pooled_occurrence_slots($zoom, array $occurrences) {
  * @return bool True when Zoom's expansion matches the local one.
  */
 function zoom_pooled_verify_occurrences($zoom, array $occurrences, $context = null) {
-    $expected = array_column(zoom_pooled_expand_occurrences($zoom), 0);
+    // Occurrence-level deletions survive any later meeting PATCH — even a
+    // recurrence-rule change appends new occurrences around the deleted
+    // tombstone, and end_times counts it (measured 2026-08-16). The rule
+    // expansion knows nothing of tombstones, so cancelled starts are
+    // excluded from the expectation before comparing.
+    $deletedstarts = [];
+    foreach ($occurrences as $occurrence) {
+        if (($occurrence->status ?? '') === 'deleted') {
+            $deletedstarts[] = (int) $occurrence->start_time;
+        }
+    }
+
+    $expected = array_diff(array_column(zoom_pooled_expand_occurrences($zoom), 0), $deletedstarts);
     $actual = array_column(zoom_pooled_occurrence_slots($zoom, $occurrences), 0);
 
     sort($expected);
