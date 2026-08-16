@@ -1108,7 +1108,12 @@ function zoom_update_instance_breakout_rooms($zoomid, $breakoutrooms) {
 function zoom_delete_instance_breakout_rooms($zoomid) {
     global $DB;
 
-    $zoomcurrentbreakoutroomsids = $DB->get_fieldset_select('zoom_meeting_breakout_rooms', 'id', "zoomid = {$zoomid}");
+    $zoomcurrentbreakoutroomsids = $DB->get_fieldset_select(
+        'zoom_meeting_breakout_rooms',
+        'id',
+        'zoomid = ?',
+        [$zoomid]
+    );
 
     foreach ($zoomcurrentbreakoutroomsids as $id) {
         $DB->delete_records('zoom_breakout_participants', ['breakoutroomid' => $id]);

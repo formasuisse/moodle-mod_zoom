@@ -45,16 +45,8 @@ require_capability('mod/zoom:refreshsessions', $context);
 $PAGE->set_url('/mod/zoom/console/');
 
 echo html_writer::tag('h1', get_string('getmeetingreports', 'mod_zoom'));
-$output = null;
-$arguments = implode(
-    ' ',
-    [
-        '--start=' . escapeshellarg($startdate),
-        '--end=' . escapeshellarg($enddate),
-        '--courseid=' . escapeshellarg($courseid),
-    ]
-);
-exec("php $CFG->dirroot/mod/zoom/cli/get_meeting_report.php $arguments", $output);
 echo '<pre>';
-echo implode("\n", $output);
+$hostuuids = $DB->get_fieldset_select('zoom', 'DISTINCT host_id', 'course = ?', [$courseid]);
+$meetingtask = new \mod_zoom\task\get_meeting_reports();
+$meetingtask->execute($startdate, $enddate, $hostuuids);
 echo '</pre>';
