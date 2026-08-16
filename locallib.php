@@ -1475,33 +1475,41 @@ function zoom_pooled_members($context = null) {
 }
 
 /**
- * Whether a candidate pool host has a scheduling conflict for a slot.
+ * Whether a candidate pool host has a scheduling conflict with any slot.
  *
- * Pooled-hosts feature. Checks the host's complete Zoom calendar
- * (includes meetings scheduled outside Moodle) against the slot, requiring
- * zoom/slotbuffer minutes of gap on both sides. Meetings without a start time
- * (recurring with no fixed time) cannot be evaluated and are ignored.
+ * Pooled-hosts feature. Checks the host's complete Zoom calendar against
+ * every slot, requiring zoom/slotbuffer minutes of gap on both sides. The
+ * listing includes meetings scheduled outside Moodle and is per-occurrence
+ * and occurrence-edit-aware (measured 2026-08-16: cancelled occurrences
+ * absent, moved ones at their actual date), fetched once over a window
+ * spanning all slots — O(1) API calls per host however many slots.
  * NB Zoom itself accepts overlapping schedules — only runtime enforces
  * one-active-meeting (T12) — so this check is the only scheduling-time guard.
  *
  * @param string $zoomuserid Candidate pool host.
- * @param int $start Slot start (Unix timestamp).
- * @param int $duration Slot duration (seconds).
- * @param ?int $excludemeetingid Meeting ID to ignore (when revalidating an existing meeting).
+ * @param array $slots [start (Unix timestamp), duration (seconds)] pairs.
+ * @param ?int $excludemeetingid Meeting ID to ignore (when revalidating an
+ *        existing meeting; matches every occurrence of that series).
  * @return bool
  */
-function zoom_pooled_slot_conflicts($zoomuserid, $start, $duration, $excludemeetingid = null) {
-    $bufferseconds = ((int) get_config('zoom', 'slotbuffer') ?: 15) * MINSECS;
-    $slotstart = $start - $bufferseconds;
-    $slotend = $start + $duration + $bufferseconds;
+function zoom_pooled_slots_conflict($zoomuserid, array $slots, $excludemeetingid = null) {
+    if (empty($slots)) {
+        return false;
+    }
 
-    // Bound the listing server-side to the day(s) around the slot. UTC dates
+    $bufferseconds = ((int) get_config('zoom', 'slotbuffer') ?: 15) * MINSECS;
+    $intervals = [];
+    foreach ($slots as $slot) {
+        $intervals[] = [$slot[0] - $bufferseconds, $slot[0] + $slot[1] + $bufferseconds];
+    }
+
+    // Bound the listing server-side to the day(s) around the slots. UTC dates
     // on purpose: Zoom interprets from/to as dates, and the one-day padding on
     // each side absorbs any timezone offset between UTC and the account TZ.
     // The overlap math itself is all epoch-based (Zoom start_time is ISO8601
     // UTC, strtotime handles the Z suffix), so only these bounds involve dates.
-    $from = gmdate('Y-m-d', $slotstart - DAYSECS);
-    $to = gmdate('Y-m-d', $slotend + DAYSECS);
+    $from = gmdate('Y-m-d', min(array_column($intervals, 0)) - DAYSECS);
+    $to = gmdate('Y-m-d', max(array_column($intervals, 1)) + DAYSECS);
 
     foreach (zoom_webservice()->get_user_upcoming_meetings($zoomuserid, $from, $to) as $meeting) {
         if ($excludemeetingid !== null && (string) $meeting->id === (string) $excludemeetingid) {
@@ -1514,8 +1522,10 @@ function zoom_pooled_slot_conflicts($zoomuserid, $start, $duration, $excludemeet
 
         $otherstart = strtotime($meeting->start_time);
         $otherend = $otherstart + (($meeting->duration ?? 60) * MINSECS);
-        if ($otherstart < $slotend && $otherend > $slotstart) {
-            return true;
+        foreach ($intervals as $interval) {
+            if ($otherstart < $interval[1] && $otherend > $interval[0]) {
+                return true;
+            }
         }
     }
 
@@ -1523,18 +1533,485 @@ function zoom_pooled_slot_conflicts($zoomuserid, $start, $duration, $excludemeet
 }
 
 /**
- * Pick a pool host with a free slot for the given meeting, or fail loudly.
+ * Normalise Zoom occurrence objects into [start, duration] slots.
  *
- * Pooled-hosts feature: called at activity save time in pooled mode.
- * A save that finds no free host errors out — that error is the capacity
- * (buy-a-seat) signal, surfaced via the pool_exhausted event.
+ * Pooled-hosts feature. Accepts raw API occurrences (ISO start_time,
+ * duration in minutes) or populate_zoom_from_response()-normalised ones
+ * (epoch seconds / duration seconds); deleted tombstones are skipped.
+ *
+ * @param stdClass $zoom Meeting record (series duration fallback).
+ * @param array $occurrences Zoom occurrence objects.
+ * @return array[] [start (Unix timestamp), duration (seconds)] pairs.
+ */
+function zoom_pooled_occurrence_slots($zoom, array $occurrences) {
+    $seriesduration = (int) ($zoom->duration ?? 0) ?: HOURSECS;
+    $slots = [];
+    foreach ($occurrences as $occurrence) {
+        if (($occurrence->status ?? '') === 'deleted') {
+            continue;
+        }
+
+        $start = is_numeric($occurrence->start_time) ? (int) $occurrence->start_time : strtotime($occurrence->start_time);
+        $duration = (int) ($occurrence->duration ?? 0);
+        if ($duration > 0 && !is_numeric($occurrence->start_time)) {
+            // Raw API values carry the duration in minutes.
+            $duration = $duration * MINSECS;
+        }
+
+        $slots[] = [$start, $duration ?: $seriesduration];
+    }
+
+    return $slots;
+}
+
+/**
+ * Refresh the persisted occurrence store from a Zoom occurrence list.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling): the store is a cache
+ * of Zoom's authoritative occurrence list, refreshed immediately after every
+ * occurrence action and daily by the update_meetings task (which also picks
+ * up out-of-band portal edits). Rows absent from the list are removed.
+ *
+ * @param int $zoomid zoom table id.
+ * @param array $occurrences Zoom occurrence objects (raw or normalised).
+ * @return void
+ */
+function zoom_pooled_sync_occurrences($zoomid, array $occurrences) {
+    global $DB;
+
+    $existing = $DB->get_records('zoom_occurrences', ['zoomid' => $zoomid], '', 'occurrenceid, id, starttime, duration, status');
+    $seen = [];
+    foreach ($occurrences as $occurrence) {
+        $occurrenceid = (string) ($occurrence->occurrence_id ?? '');
+        if ($occurrenceid === '') {
+            continue;
+        }
+
+        $start = is_numeric($occurrence->start_time) ? (int) $occurrence->start_time : strtotime($occurrence->start_time);
+        $duration = (int) ($occurrence->duration ?? 0);
+        if ($duration > 0 && !is_numeric($occurrence->start_time)) {
+            $duration = $duration * MINSECS;
+        }
+
+        $status = ($occurrence->status ?? '') === 'deleted' ? 'deleted' : 'available';
+        $seen[$occurrenceid] = true;
+
+        if (isset($existing[$occurrenceid])) {
+            $row = $existing[$occurrenceid];
+            if ((int) $row->starttime !== $start || (int) $row->duration !== $duration || $row->status !== $status) {
+                $DB->update_record('zoom_occurrences', (object) [
+                    'id' => $row->id,
+                    'starttime' => $start,
+                    'duration' => $duration,
+                    'status' => $status,
+                    'timemodified' => time(),
+                ]);
+            }
+        } else {
+            $DB->insert_record('zoom_occurrences', (object) [
+                'zoomid' => $zoomid,
+                'occurrenceid' => $occurrenceid,
+                'starttime' => $start,
+                'duration' => $duration,
+                'status' => $status,
+                'timemodified' => time(),
+            ]);
+        }
+    }
+
+    foreach ($existing as $occurrenceid => $row) {
+        if (!isset($seen[$occurrenceid])) {
+            $DB->delete_records('zoom_occurrences', ['id' => $row->id]);
+        }
+    }
+}
+
+/**
+ * Re-read a meeting from Zoom and refresh record, occurrence store and calendar.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling): called after every
+ * occurrence action so Moodle reflects the change immediately instead of at
+ * the daily sync.
+ *
+ * @param stdClass $zoom zoom record (must have id, meeting_id, webinar).
+ * @return stdClass The refreshed record (with ->occurrences).
+ */
+function zoom_pooled_refresh_from_zoom($zoom) {
+    global $CFG, $DB;
+    require_once($CFG->dirroot . '/mod/zoom/lib.php');
+
+    $response = zoom_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
+    $zoom = populate_zoom_from_response($zoom, $response);
+    $DB->update_record('zoom', $zoom);
+    zoom_pooled_sync_occurrences($zoom->id, $zoom->occurrences ?? []);
+    zoom_calendar_item_update($zoom);
+    return $zoom;
+}
+
+/**
+ * Zoom recording types that carry video (the occurrence table lists only
+ * these; audio-only, transcript, chat etc. files are not shown).
+ */
+define('ZOOM_POOLED_VIDEO_RECORDING_TYPES', [
+    'shared_screen_with_speaker_view',
+    'shared_screen_with_speaker_view(CC)',
+    'shared_screen_with_gallery_view',
+    'shared_screen',
+    'speaker_view',
+    'gallery_view',
+    'active_speaker',
+]);
+
+/**
+ * Render the occurrence table for a pooled meeting.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling): the single schedule
+ * surface — one row per occurrence with inline video recordings; managers
+ * get add/move/cancel actions (occurrence.php). Replaces the Schedule box.
+ *
+ * @param stdClass $zoom zoom record.
+ * @param stdClass $cm Course module.
+ * @param bool $iszoommanager Whether the viewer manages this activity.
+ * @return string HTML ('' when there is nothing to show).
+ */
+function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
+    global $DB, $OUTPUT;
+
+    $rows = $DB->get_records('zoom_occurrences', ['zoomid' => $zoom->id], 'starttime ASC');
+    if (empty($rows) && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS) {
+        // Series predating the store (or created out-of-band): hydrate once.
+        try {
+            $zoom = zoom_pooled_refresh_from_zoom($zoom);
+            $rows = $DB->get_records('zoom_occurrences', ['zoomid' => $zoom->id], 'starttime ASC');
+        } catch (moodle_exception $error) {
+            debugging('mod_zoom pooled: occurrence hydration failed: ' . $error->getMessage(), DEBUG_DEVELOPER);
+        }
+    }
+
+    if (empty($rows)) {
+        if (empty($zoom->start_time) || !empty($zoom->recurring)) {
+            // Recurring-no-fixed-time (or nothing to show at all).
+            return '';
+        }
+
+        // Legacy single meeting: one read-only row.
+        $rows = [(object) [
+            'occurrenceid' => '',
+            'starttime' => (int) $zoom->start_time,
+            'duration' => (int) $zoom->duration,
+            'status' => 'available',
+        ]];
+    }
+
+    // Video recordings grouped by local calendar day of the recording start.
+    $recordingsbyday = [];
+    if (get_config('zoom', 'viewrecordings')) {
+        foreach ($DB->get_records('zoom_meeting_recordings', ['zoomid' => $zoom->id], 'recordingstart ASC') as $recording) {
+            if (!in_array($recording->recordingtype, ZOOM_POOLED_VIDEO_RECORDING_TYPES, true)) {
+                continue;
+            }
+
+            if (!$iszoommanager && intval($recording->showrecording) !== 1) {
+                continue;
+            }
+
+            $recordingsbyday[userdate($recording->recordingstart, '%Y%m%d')][] = $recording;
+        }
+    }
+
+    $table = new html_table();
+    $table->attributes['class'] = 'generaltable mod_view';
+    $table->id = 'zoom_occurrence_table';
+    $table->head = [
+        get_string('occ_date', 'mod_zoom'),
+        get_string('duration', 'zoom'),
+        get_string('occ_status', 'mod_zoom'),
+    ];
+    if (!empty($recordingsbyday) || $iszoommanager) {
+        $table->head[] = get_string('recordings', 'mod_zoom');
+    }
+
+    if ($iszoommanager) {
+        $table->head[] = '';
+    }
+
+    $now = time();
+    foreach ($rows as $row) {
+        $cancelled = ($row->status === 'deleted');
+        $past = !$cancelled && ($row->starttime + ($row->duration ?: HOURSECS)) < $now;
+
+        $datetext = userdate($row->starttime, get_string('strftimedaydatetime', 'langconfig'));
+        if ($cancelled) {
+            $datetext = html_writer::tag('s', $datetext);
+            $status = html_writer::span(get_string('occ_cancelled', 'mod_zoom'), 'badge badge-secondary text-muted');
+        } else if ($past) {
+            $status = html_writer::span(get_string('occ_past', 'mod_zoom'), 'badge badge-light');
+        } else {
+            $status = html_writer::span(get_string('occ_upcoming', 'mod_zoom'), 'badge badge-info');
+        }
+
+        $cells = [$datetext, $cancelled ? '' : format_time((int) ($row->duration ?: $zoom->duration)), $status];
+
+        if (!empty($recordingsbyday) || $iszoommanager) {
+            $links = [];
+            if (!$cancelled) {
+                foreach ($recordingsbyday[userdate($row->starttime, '%Y%m%d')] ?? [] as $recording) {
+                    $url = new moodle_url('/mod/zoom/loadrecording.php', ['id' => $cm->id, 'recordingid' => $recording->id]);
+                    $label = get_string('occ_recording', 'mod_zoom');
+                    if ($iszoommanager && intval($recording->showrecording) !== 1) {
+                        $label .= ' ' . get_string('occ_recording_hidden', 'mod_zoom');
+                    }
+
+                    $links[] = html_writer::link($url, $label, ['target' => '_blank']);
+                }
+            }
+
+            $cells[] = implode(' ', $links);
+        }
+
+        if ($iszoommanager) {
+            $actions = [];
+            if (!$cancelled && !$past && $row->occurrenceid !== '' && !empty($zoom->recurring)) {
+                $moveurl = new moodle_url('/mod/zoom/occurrence.php', [
+                    'id' => $cm->id, 'action' => 'move', 'occurrence' => $row->occurrenceid,
+                ]);
+                $cancelurl = new moodle_url('/mod/zoom/occurrence.php', [
+                    'id' => $cm->id, 'action' => 'cancel', 'occurrence' => $row->occurrenceid, 'sesskey' => sesskey(),
+                ]);
+                $actions[] = html_writer::link($moveurl, get_string('occ_move', 'mod_zoom'));
+                $actions[] = html_writer::link($cancelurl, get_string('occ_cancel', 'mod_zoom'));
+            }
+
+            $cells[] = implode(' | ', $actions);
+        }
+
+        $table->data[] = $cells;
+    }
+
+    $html = $OUTPUT->box_start('', 'zoom_section-occurrences');
+    $html .= $OUTPUT->heading(get_string('occurrences', 'mod_zoom'), 3);
+    $html .= html_writer::table($table);
+    if ($iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS) {
+        $addurl = new moodle_url('/mod/zoom/occurrence.php', ['id' => $cm->id, 'action' => 'add']);
+        $html .= html_writer::div(html_writer::link($addurl, get_string('occ_add', 'mod_zoom'), ['class' => 'btn btn-secondary']));
+    }
+
+    $html .= $OUTPUT->box_end();
+    return $html;
+}
+
+/**
+ * Collect the planned session dates from the activity form data.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling): the plan is the first
+ * session (start_time) plus every enabled row of the plandates repeater,
+ * de-duplicated and sorted.
+ *
+ * @param stdClass $data Form data.
+ * @return int[] Sorted Unix timestamps.
+ */
+function zoom_pooled_collect_plan($data) {
+    $dates = [(int) ($data->start_time ?? 0)];
+    foreach ((array) ($data->plandates ?? []) as $date) {
+        if ((int) $date > 0) {
+            $dates[] = (int) $date;
+        }
+    }
+
+    $dates = array_values(array_unique(array_filter($dates)));
+    sort($dates);
+    return $dates;
+}
+
+/**
+ * Move a freshly created scaffold series onto the planned dates.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling): after create the
+ * series sits on the scaffold grid (weekly from the first session); each
+ * grid occurrence is PATCHed onto its planned date (both sorted, 1:1), then
+ * record, store and calendar are refreshed from Zoom.
+ *
+ * @param stdClass $zoom zoom record (id, meeting_id, webinar set).
+ * @param array $occurrences The create response's occurrence list.
+ * @param int[] $dates Planned dates (sorted).
+ * @param int $duration Session duration (seconds).
+ * @return stdClass The refreshed record.
+ */
+function zoom_pooled_apply_plan($zoom, array $occurrences, array $dates, $duration) {
+    // [start, duration, occurrence_id] per non-deleted occurrence, by start.
+    $grid = [];
+    foreach ($occurrences as $occurrence) {
+        if (($occurrence->status ?? '') === 'deleted') {
+            continue;
+        }
+
+        $start = is_numeric($occurrence->start_time) ? (int) $occurrence->start_time : strtotime($occurrence->start_time);
+        $gridduration = (int) ($occurrence->duration ?? 0);
+        if ($gridduration > 0 && !is_numeric($occurrence->start_time)) {
+            $gridduration = $gridduration * MINSECS;
+        }
+
+        $grid[] = [$start, $gridduration, (string) $occurrence->occurrence_id];
+    }
+
+    usort($grid, function ($a, $b) {
+        return $a[0] <=> $b[0];
+    });
+    if (count($grid) !== count($dates)) {
+        debugging('mod_zoom pooled: scaffold expanded to ' . count($grid) . ' occurrences for '
+            . count($dates) . ' planned dates', DEBUG_DEVELOPER);
+    }
+
+    foreach ($dates as $i => $date) {
+        if (!isset($grid[$i])) {
+            break;
+        }
+
+        if ($grid[$i][0] !== $date || $grid[$i][1] !== $duration) {
+            zoom_webservice()->patch_meeting_occurrence($zoom, $grid[$i][2], $date, $duration);
+        }
+    }
+
+    return zoom_pooled_refresh_from_zoom($zoom);
+}
+
+/**
+ * Local wall-clock representation of an epoch for occurrence PATCH bodies.
+ *
+ * Zoom occurrence updates take a local datetime + timezone; use the same
+ * timezone create_meeting() sends so the semantics line up.
+ *
+ * @param int $epoch Unix timestamp.
+ * @return array [start_time (Y-m-d\TH:i:s), timezone]
+ */
+function zoom_pooled_local_start($epoch) {
+    global $CFG;
+    $tzname = !empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get();
+    try {
+        $tz = new DateTimeZone($tzname);
+    } catch (Exception $e) {
+        $tz = new DateTimeZone(date_default_timezone_get());
+        $tzname = $tz->getName();
+    }
+
+    $local = (new DateTimeImmutable('@' . $epoch))->setTimezone($tz)->format('Y-m-d\TH:i:s');
+    return [$local, $tzname];
+}
+
+/**
+ * Add an occurrence to a pooled series at a given slot.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling). Zoom has no
+ * add-occurrence API; the measured-safe composite is: extend the scaffold
+ * rule by one (grid-compatible end_times+1 preserves every occurrence edit),
+ * then move the appended occurrence onto the target date. The target slot is
+ * conflict-checked against the meeting's (fixed) host first.
+ *
+ * @param stdClass $zoom zoom record.
+ * @param int $start Target start (Unix timestamp).
+ * @param int $duration Target duration (seconds).
+ * @return void
+ * @throws moodle_exception zoomerr_pool_exhausted on slot conflict,
+ *         zoomerr_occurrence_limit at the series cap.
+ */
+function zoom_pooled_occurrence_add($zoom, $start, $duration) {
+    global $DB;
+
+    // Zoom honors end_times up to 60; above that a PATCH silently collapses
+    // the series to a single occurrence (measured 2026-08-16) — hard stop.
+    $endtimes = (int) ($zoom->end_times ?? 1);
+    if ($endtimes >= 60) {
+        throw new moodle_exception('zoomerr_occurrence_limit', 'mod_zoom');
+    }
+
+    if (zoom_pooled_slots_conflict($zoom->host_id, [[$start, $duration]], $zoom->meeting_id)) {
+        throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+    }
+
+    $known = $DB->get_records('zoom_occurrences', ['zoomid' => $zoom->id], '', 'occurrenceid');
+    zoom_webservice()->extend_meeting_series($zoom, $endtimes + 1);
+    $zoom->end_times = $endtimes + 1;
+    $DB->set_field('zoom', 'end_times', $zoom->end_times, ['id' => $zoom->id]);
+
+    // Find the appended occurrence (the one the store has never seen).
+    $response = zoom_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
+    $appended = null;
+    foreach ($response->occurrences ?? [] as $occurrence) {
+        if (!isset($known[(string) $occurrence->occurrence_id])) {
+            $appended = $occurrence;
+            break;
+        }
+    }
+
+    if ($appended !== null) {
+        zoom_webservice()->patch_meeting_occurrence($zoom, $appended->occurrence_id, $start, $duration);
+    }
+
+    zoom_pooled_refresh_from_zoom($zoom);
+}
+
+/**
+ * Move an occurrence of a pooled series to a new slot.
+ *
+ * @param stdClass $zoom zoom record.
+ * @param string $occurrenceid Zoom occurrence_id.
+ * @param int $start New start (Unix timestamp).
+ * @param int $duration New duration (seconds).
+ * @return void
+ * @throws moodle_exception zoomerr_pool_exhausted on slot conflict.
+ */
+function zoom_pooled_occurrence_move($zoom, $occurrenceid, $start, $duration) {
+    if (zoom_pooled_slots_conflict($zoom->host_id, [[$start, $duration]], $zoom->meeting_id)) {
+        throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+    }
+
+    zoom_webservice()->patch_meeting_occurrence($zoom, $occurrenceid, $start, $duration);
+    zoom_pooled_refresh_from_zoom($zoom);
+}
+
+/**
+ * Cancel an occurrence of a pooled series.
+ *
+ * Deletion is a permanent tombstone on Zoom (measured 2026-08-16): it
+ * survives any later meeting PATCH and frees the host's slot. The last
+ * remaining active occurrence cannot be cancelled — delete the activity
+ * instead (Zoom may drop the whole meeting with its final occurrence).
+ *
+ * @param stdClass $zoom zoom record.
+ * @param string $occurrenceid Zoom occurrence_id.
+ * @return void
+ * @throws moodle_exception zoomerr_last_occurrence when it is the last one.
+ */
+function zoom_pooled_occurrence_cancel($zoom, $occurrenceid) {
+    global $DB;
+
+    $active = $DB->count_records('zoom_occurrences', ['zoomid' => $zoom->id, 'status' => 'available']);
+    if ($active <= 1) {
+        throw new moodle_exception('zoomerr_last_occurrence', 'mod_zoom');
+    }
+
+    zoom_webservice()->delete_meeting_occurrence($zoom, $occurrenceid);
+    zoom_pooled_refresh_from_zoom($zoom);
+}
+
+/**
+ * Pick a pool host free for EVERY given slot, or fail loudly.
+ *
+ * Pooled-hosts feature (occurrence-first scheduling): called at activity
+ * save time with the full planned-date set, so placement is batch-shaped —
+ * the host must fit the whole plan up front (a later host change would mean
+ * a new meeting id and so a new join link). A save that finds no free host
+ * errors out — that error is the capacity (buy-a-seat) signal, surfaced via
+ * the pool_exhausted event.
  *
  * @param stdClass $zoom The meeting as built from the form.
+ * @param array $slots [start (Unix timestamp), duration (seconds)] pairs;
+ *        empty = nothing to check (first member wins).
  * @param ?context $context Module/course context for events.
  * @return string The chosen Zoom user ID.
- * @throws moodle_exception When no pool host is free for the slot.
+ * @throws moodle_exception When no pool host is free for every slot.
  */
-function zoom_pooled_pick_host($zoom, $context = null) {
+function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
     $members = zoom_pooled_members($context);
 
     // Registration is a licensed-host feature (an unlicensed host's
@@ -1556,20 +2033,21 @@ function zoom_pooled_pick_host($zoom, $context = null) {
         $members = array_merge(array_slice($members, $offset), array_slice($members, 0, $offset));
     }
 
-    // Recurring-no-fixed-time meetings have no slot to check — first member wins.
-    $start = (int) ($zoom->start_time ?? 0);
-    $duration = (int) ($zoom->duration ?? 0);
     $exclude = !empty($zoom->meeting_id) && $zoom->meeting_id != -1 ? $zoom->meeting_id : null;
 
     foreach ($members as $member) {
-        if ($start === 0 || !zoom_pooled_slot_conflicts($member->id, $start, $duration, $exclude)) {
+        if (empty($slots) || !zoom_pooled_slots_conflict($member->id, $slots, $exclude)) {
             return $member->id;
         }
     }
 
     \mod_zoom\event\pool_exhausted::create([
         'context' => $context ?? context_system::instance(),
-        'other' => ['start' => $start, 'duration' => $duration],
+        'other' => [
+            'start' => empty($slots) ? 0 : $slots[0][0],
+            'duration' => empty($slots) ? 0 : $slots[0][1],
+            'occurrences' => count($slots),
+        ],
     ])->trigger();
     throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
 }
