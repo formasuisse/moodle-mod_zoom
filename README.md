@@ -133,10 +133,14 @@ How it works:
   are revalidated **only when the schedule changed** (an unchanged schedule
   keeps its already-validated — possibly occurrence-edited — bookings; the
   rule must not re-claim them), rejecting the save on conflict rather than
-  ever rolling back a live meeting. Cancelled occurrences never return —
-  deletion tombstones survive even recurrence-rule PATCHes, with `end_times`
-  still counting them (measured) — so tombstoned slots are excluded from
-  revalidation and from the expansion/readback comparison. The scan starts at a position hashed
+  ever rolling back a live meeting. Occurrence-level edits are durable
+  through grid-compatible rule PATCHes and wiped by grid-changing ones
+  (measured): a deleted occurrence stays a tombstone (`end_times` still
+  counts it), a moved one keeps its new date, and `occurrence_id` is the
+  epoch of the occurrence's original grid slot. Revalidation and the
+  expansion/readback comparison reconcile per grid slot — deleted → no
+  slot, moved → its actual date — so occurrence edits neither false-reject
+  a series edit nor trip the mismatch event. The scan starts at a position hashed
   from the teacher so the same teacher tends to stay on the same pool host.
   No free host = the save fails (`pool_exhausted`) — that is the capacity
   signal. Duration is mandatory for scheduled meetings in pooled mode.

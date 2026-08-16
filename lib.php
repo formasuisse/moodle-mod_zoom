@@ -239,27 +239,36 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
         $newslots = zoom_pooled_expand_occurrences($zoom);
         $schedulechanged = $oldzoom === null || $newslots !== zoom_pooled_expand_occurrences($oldzoom);
         if ($schedulechanged && !empty($newslots)) {
-            // Cancelled occurrences never come back — deletion tombstones
-            // survive even recurrence-rule PATCHes (measured 2026-08-16) —
-            // so their slots are not being re-claimed by this change.
-            // Exclude them, or prolonging a series would falsely reject when
-            // a cancelled slot's freed time was re-booked by another meeting.
+            // Occurrence-level edits survive grid-compatible rule PATCHes
+            // (measured 2026-08-16): a grid slot anchoring a DELETED
+            // occurrence stays dead, one anchoring a MOVED occurrence
+            // (occurrence_id = original grid epoch, start_time elsewhere) is
+            // not actually held. Exclude both from the rule's claim, or
+            // prolonging a series would falsely reject when such a freed
+            // slot was re-booked by another meeting. Grid-CHANGING rule
+            // PATCHes regenerate every occurrence from the rule — there the
+            // anchors don't match the new slots and nothing is excluded.
             try {
                 $current = zoom_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
-                $deletedstarts = [];
+                $unheld = [];
                 foreach ($current->occurrences ?? [] as $occurrence) {
-                    if (($occurrence->status ?? '') === 'deleted') {
-                        $deletedstarts[] = strtotime($occurrence->start_time);
+                    if (!is_numeric($occurrence->occurrence_id ?? null)) {
+                        continue;
+                    }
+
+                    $gridslot = (int) ($occurrence->occurrence_id / 1000);
+                    if (($occurrence->status ?? '') === 'deleted' || strtotime($occurrence->start_time) !== $gridslot) {
+                        $unheld[] = $gridslot;
                     }
                 }
 
-                if (!empty($deletedstarts)) {
-                    $newslots = array_values(array_filter($newslots, function ($slot) use ($deletedstarts) {
-                        return !in_array($slot[0], $deletedstarts, true);
+                if (!empty($unheld)) {
+                    $newslots = array_values(array_filter($newslots, function ($slot) use ($unheld) {
+                        return !in_array($slot[0], $unheld, true);
                     }));
                 }
             } catch (moodle_exception $error) {
-                // Tombstone exclusion is an optimisation — check strictly.
+                // Anchor exclusion is an optimisation — check strictly.
                 debugging('mod_zoom pooled: occurrence readback failed, revalidating strictly: '
                     . $error->getMessage(), DEBUG_DEVELOPER);
             }

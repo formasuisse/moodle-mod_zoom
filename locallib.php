@@ -1741,19 +1741,33 @@ function zoom_pooled_occurrence_slots($zoom, array $occurrences) {
  * @return bool True when Zoom's expansion matches the local one.
  */
 function zoom_pooled_verify_occurrences($zoom, array $occurrences, $context = null) {
-    // Occurrence-level deletions survive any later meeting PATCH — even a
-    // recurrence-rule change appends new occurrences around the deleted
-    // tombstone, and end_times counts it (measured 2026-08-16). The rule
-    // expansion knows nothing of tombstones, so cancelled starts are
-    // excluded from the expectation before comparing.
-    $deletedstarts = [];
+    // Occurrence-level edits survive grid-compatible meeting PATCHes
+    // (measured 2026-08-16): a deleted occurrence stays a tombstone and a
+    // moved one keeps its new date through topic, same-rule and
+    // rule-prolonging PATCHes, while a grid-changing rule PATCH (other
+    // weekday) regenerates everything from the rule. The reconciliation key
+    // is occurrence_id — measured to be the epoch (ms) of the occurrence's
+    // ORIGINAL grid slot, unchanged by moves. Expectation per expansion
+    // slot: an occurrence anchored there dictates reality (deleted → no
+    // slot, moved → its actual start); no anchor → the slot itself.
+    $bygridslot = [];
     foreach ($occurrences as $occurrence) {
-        if (($occurrence->status ?? '') === 'deleted') {
-            $deletedstarts[] = (int) $occurrence->start_time;
+        if (is_numeric($occurrence->occurrence_id ?? null)) {
+            $bygridslot[(int) ($occurrence->occurrence_id / 1000)] = $occurrence;
         }
     }
 
-    $expected = array_diff(array_column(zoom_pooled_expand_occurrences($zoom), 0), $deletedstarts);
+    $expected = [];
+    foreach (array_column(zoom_pooled_expand_occurrences($zoom), 0) as $slot) {
+        if (isset($bygridslot[$slot])) {
+            if (($bygridslot[$slot]->status ?? '') !== 'deleted') {
+                $expected[] = (int) $bygridslot[$slot]->start_time;
+            }
+        } else {
+            $expected[] = $slot;
+        }
+    }
+
     $actual = array_column(zoom_pooled_occurrence_slots($zoom, $occurrences), 0);
 
     sort($expected);
