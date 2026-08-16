@@ -231,13 +231,23 @@ final class pooled_occurrences_test extends advanced_testcase {
         $this->assertSame(array_map(fn($d) => $this->ts($d . ' 09:00'), $expected), $this->starts($zoom));
     }
 
-    public function test_occurrence_count_is_capped(): void {
-        $zoom = $this->make_zoom([
+    public function test_occurrence_count_capped_at_measured_zoom_maxima(): void {
+        // Zoom expands at most 110 weekly / 365 daily occurrences (measured).
+        $weekly = $this->make_zoom([
             'start_time' => $this->ts('2027-06-07 09:00'),
             'weekly_days' => '2',
-            'end_times' => 500,
+            'end_date_option' => ZOOM_END_DATE_OPTION_BY,
+            'end_date_time' => $this->ts('2037-06-07 00:00'),
         ]);
-        $this->assertCount(100, $this->starts($zoom));
+        $this->assertCount(110, $this->starts($weekly));
+
+        $daily = $this->make_zoom([
+            'recurrence_type' => ZOOM_RECURRINGTYPE_DAILY,
+            'start_time' => $this->ts('2027-06-07 09:00'),
+            'end_date_option' => ZOOM_END_DATE_OPTION_BY,
+            'end_date_time' => $this->ts('2037-06-07 00:00'),
+        ]);
+        $this->assertCount(365, $this->starts($daily));
     }
 
     public function test_duration_carried_on_every_slot(): void {

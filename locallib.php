@@ -1517,9 +1517,18 @@ function zoom_pooled_expand_occurrences($zoom) {
 
     $interval = max(1, (int) ($zoom->repeat_interval ?? 1));
 
-    // Bound the expansion: Zoom's own occurrence expansion never exceeds this
-    // (its per-rule caps are all lower), so the cap can't hide a real slot.
-    $maxcount = 100;
+    // Bound the expansion by Zoom's own measured truncation (2026-08-16):
+    // end-date rules expand to at most 365 daily / 110 weekly / 36 monthly
+    // occurrences at interval 1 (larger intervals hit a ~3-year horizon
+    // first — that corner over-claims here and is caught by the
+    // recurrence_mismatch tripwire), and an end_times above 60 silently
+    // collapses to a SINGLE occurrence on Zoom (the form caps it at 50).
+    $typemax = [
+        ZOOM_RECURRINGTYPE_DAILY => 365,
+        ZOOM_RECURRINGTYPE_WEEKLY => 110,
+        ZOOM_RECURRINGTYPE_MONTHLY => 36,
+    ];
+    $maxcount = $typemax[$recurrencetype] ?? 100;
     $endday = null;
     $endsbydate = ($zoom->end_date_option ?? ZOOM_END_DATE_OPTION_AFTER) == ZOOM_END_DATE_OPTION_BY
         && !empty($zoom->end_date_time);
