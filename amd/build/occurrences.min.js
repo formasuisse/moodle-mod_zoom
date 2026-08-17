@@ -37,12 +37,19 @@ define([], function() {
                 var span = scope.querySelector('[data-zoom-occ-weekday]');
                 var text = scope.querySelector('.zoom-occ-datetext');
                 var btn = scope.querySelector('.zoom-occ-datebtn');
-                var fmt = function(iso) {
-                    if (!iso) {
-                        return '';
+                // Locale-proper via Intl, keyed to the MOODLE language (the
+                // page lang attribute): formatToParts teaches us the field
+                // order and separator, so typing parses with the same rules
+                // the display uses.
+                var dtf = new Intl.DateTimeFormat(lang, {day: '2-digit', month: '2-digit', year: 'numeric'});
+                var order = [];
+                dtf.formatToParts(new Date(2001, 10, 22)).forEach(function(part) {
+                    if (part.type === 'day' || part.type === 'month' || part.type === 'year') {
+                        order.push(part.type);
                     }
-                    var p = iso.split('-');
-                    return p[2] + '/' + p[1] + '/' + p[0];
+                });
+                var fmt = function(iso) {
+                    return iso ? dtf.format(new Date(iso + 'T12:00:00')) : '';
                 };
                 var refresh = function() {
                     if (span) {
@@ -89,17 +96,25 @@ define([], function() {
                         span.style.cursor = 'pointer';
                         span.addEventListener('click', openPicker);
                     }
+                    text.placeholder = fmt('1999-12-31');
                     text.addEventListener('change', function() {
                         var raw = text.value.trim();
                         if (raw === '') {
                             input.value = '';
                         } else {
-                            var m = raw.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})$/);
-                            if (!m) {
+                            var bits = raw.split(/[^0-9]+/).filter(Boolean);
+                            var fields = {};
+                            order.forEach(function(type, i) {
+                                fields[type] = parseInt(bits[i], 10);
+                            });
+                            if (bits.length !== 3 || String(fields.year).length > 4 || fields.year < 1000
+                                    || !(fields.month >= 1 && fields.month <= 12)
+                                    || !(fields.day >= 1 && fields.day <= 31)) {
                                 text.classList.add('is-invalid');
                                 return;
                             }
-                            input.value = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+                            input.value = fields.year + '-' + ('0' + fields.month).slice(-2)
+                                + '-' + ('0' + fields.day).slice(-2);
                         }
                         input.dispatchEvent(new Event('input'));
                         input.dispatchEvent(new Event('change'));
