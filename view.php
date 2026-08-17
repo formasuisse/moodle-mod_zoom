@@ -249,7 +249,9 @@ if (!$showrecreate) {
         $link = html_writer::tag('div', $unavailabilitynote, ['class' => 'alert alert-primary']);
     }
 
-    echo $OUTPUT->box_start('generalbox text-center');
+    // Center the primary action (Join button); the unavailability notice
+    // reads left-aligned like the rest of the page (occurrences table etc.).
+    echo $OUTPUT->box_start('generalbox' . ($available ? ' text-center' : ''));
     echo $link;
     echo $OUTPUT->box_end();
 }
