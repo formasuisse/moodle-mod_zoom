@@ -197,7 +197,9 @@ define([], function() {
                                 } else if (kind === 'weekly') {
                                     d.setDate(d.getDate() + 7 * added);
                                 } else {
-                                    d.setMonth(d.getMonth() + added);
+                                    // "+5m" = every 4 weeks: the weekday is
+                                    // preserved (calendar months would drift).
+                                    d.setDate(d.getDate() + 28 * added);
                                 }
                                 setRow(rows[i], {
                                     date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()),

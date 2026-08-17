@@ -2062,7 +2062,7 @@ function zoom_pooled_planner_html($rows = 30) {
             $html .= html_writer::tag('button', get_string($string, 'mod_zoom'), [
                 'type' => 'button', 'data-zoom-occ-spread' => $kind,
                 'class' => 'btn btn-link btn-sm d-none px-1',
-                'title' => get_string('occ_planner_spread', 'mod_zoom'),
+                'title' => get_string($string . '_help', 'mod_zoom'),
             ]);
         }
 
