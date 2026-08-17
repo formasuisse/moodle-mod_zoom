@@ -1778,7 +1778,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     // — tied together by the HTML5 form="" attribute (no JS, valid nesting).
     $formhiddens = function ($formid, $action, $occurrenceid = '') use ($cm) {
         $html = html_writer::start_tag('form', [
-            'id' => $formid, 'method' => 'post',
+            'id' => $formid, 'method' => 'post', 'class' => 'd-inline',
             'action' => new moodle_url('/mod/zoom/occurrence.php'),
         ]);
         $html .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'id', 'value' => $cm->id]);
@@ -1795,12 +1795,19 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     $slotinputs = function ($formid, $epoch) {
         [$local] = zoom_pooled_local_start($epoch);
         $time = substr($local, 11, 5);
-        $html = html_writer::span(userdate($epoch, '%a'), 'zoom-occ-weekday mr-1', ['data-zoom-occ-weekday' => 1]);
+        // The weekday rides inside the field as an input-group prefix — a
+        // native date input cannot display it in its own text.
+        $html = html_writer::start_div('input-group d-inline-flex w-auto mr-1 align-middle');
+        $html .= html_writer::div(
+            html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', ['data-zoom-occ-weekday' => 1]),
+            'input-group-prepend'
+        );
         $html .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'newdate', 'form' => $formid,
             'value' => substr($local, 0, 10), 'required' => 'required',
-            'class' => 'form-control d-inline-block w-auto mr-1 zoom-occ-date',
+            'class' => 'form-control w-auto zoom-occ-date',
         ]);
+        $html .= html_writer::end_div();
         $html .= html_writer::select(
             zoom_pooled_time_options($time),
             'newtime',
@@ -1892,7 +1899,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
                 ]), get_string('occ_remove', 'mod_zoom'));
             }
 
-            $cells[] = $actions;
+            $cells[] = html_writer::div($actions, 'text-nowrap');
         }
 
         $table->data[] = $cells;
@@ -2035,14 +2042,19 @@ function zoom_pooled_planner_html($rows = 30) {
         $html .= html_writer::start_div('mb-1 zoom-occ-planner-row' . ($first ? '' : ' d-none'), [
             'data-zoom-occ-row' => $i,
         ]);
-        $html .= html_writer::span('', 'zoom-occ-weekday d-inline-block mr-1', [
-            'data-zoom-occ-weekday' => 1, 'style' => 'width:2.5em',
-        ]);
+        $html .= html_writer::start_div('input-group d-inline-flex w-auto mr-1 align-middle');
+        $html .= html_writer::div(
+            html_writer::span('', 'input-group-text zoom-occ-weekday', [
+                'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
+            ]),
+            'input-group-prepend'
+        );
         $html .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'zoomplan_date[]',
             'value' => $first ? $defaultdate : '',
-            'class' => 'form-control d-inline-block w-auto mr-1 zoom-occ-date',
+            'class' => 'form-control w-auto zoom-occ-date',
         ]);
+        $html .= html_writer::end_div();
         $html .= html_writer::empty_tag('input', [
             'type' => 'text', 'name' => 'zoomplan_time[]',
             'value' => $first ? $defaulttime : '',

@@ -33,7 +33,8 @@ define([], function() {
             var lang = document.documentElement.lang || undefined;
 
             document.querySelectorAll('input.zoom-occ-date').forEach(function(input) {
-                var span = input.parentElement.querySelector('[data-zoom-occ-weekday]');
+                var scope = input.closest('.input-group') || input.parentElement;
+                var span = scope.querySelector('[data-zoom-occ-weekday]');
                 if (!span) {
                     return;
                 }
