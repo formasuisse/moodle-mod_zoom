@@ -1864,9 +1864,18 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         if (!empty($recordingsbyday) || $iszoommanager) {
             $links = [];
             if (!$cancelled) {
-                foreach ($recordingsbyday[userdate($row->starttime, '%Y%m%d')] ?? [] as $recording) {
+                $dayrecordings = $recordingsbyday[userdate($row->starttime, '%Y%m%d')] ?? [];
+                foreach ($dayrecordings as $recording) {
                     $url = new moodle_url('/mod/zoom/loadrecording.php', ['id' => $cm->id, 'recordingid' => $recording->id]);
                     $label = get_string('occ_recording', 'mod_zoom');
+                    // Several recordings on one session (stop/restart
+                    // segments, multiple video views): the start time is
+                    // what tells them apart — the name is just the meeting
+                    // topic, identical on all of them.
+                    if (count($dayrecordings) > 1) {
+                        $label .= ' ' . userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'));
+                    }
+
                     if ($iszoommanager && intval($recording->showrecording) !== 1) {
                         $label .= ' ' . get_string('occ_recording_hidden', 'mod_zoom');
                     }
@@ -1875,7 +1884,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
                 }
             }
 
-            $cells[] = implode(' ', $links);
+            $cells[] = implode(' <span class="text-muted">·</span> ', $links);
         }
 
         if ($iszoommanager) {
