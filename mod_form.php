@@ -30,6 +30,12 @@ defined('MOODLE_INTERNAL') || die();
 require_once($CFG->dirroot . '/course/moodleform_mod.php');
 require_once($CFG->dirroot . '/mod/zoom/lib.php');
 require_once($CFG->dirroot . '/mod/zoom/locallib.php');
+// Parents of the occurrence slot-picker elements defined at the bottom of
+// this file: both are lazily loaded by QuickForm's element registry, so
+// nothing guarantees they exist when this file is parsed ("Class
+// HTML_QuickForm_input not found" otherwise, context-dependent).
+require_once($CFG->libdir . '/pear/HTML/QuickForm/input.php');
+require_once($CFG->libdir . '/form/group.php');
 
 /**
  * Module instance settings form
