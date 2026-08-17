@@ -152,10 +152,19 @@ try {
                 'confirm' => 1, 'sesskey' => sesskey(),
             ]);
             $confirmstring = $action === 'delete' ? 'occ_delete_confirm' : 'occ_cancel_confirm';
+            // Explicit button labels: the generic Annuler/Continuer pair is
+            // hopeless under a message that itself starts with "Annuler …?".
+            $confirmbutton = new single_button(
+                $confirmurl,
+                get_string($action === 'delete' ? 'occ_delete_confirm_btn' : 'occ_cancel_confirm_btn', 'mod_zoom'),
+                'post',
+                single_button::BUTTON_DANGER
+            );
+            $backbutton = new single_button($viewurl, get_string('back'), 'get');
             echo $OUTPUT->confirm(
                 get_string($confirmstring, 'mod_zoom', userdate($occurrence->starttime)),
-                $confirmurl,
-                $viewurl
+                $confirmbutton,
+                $backbutton
             );
             echo $OUTPUT->footer();
             die();
