@@ -251,6 +251,7 @@ $string['occ_planner_weekly'] = '+5w';
 $string['occ_planner_weekly_help'] = 'Add 5 weekly occurrences after this row (same weekday, same time and duration)';
 $string['occ_recording'] = 'Recording';
 $string['occ_recording_hidden'] = '(hidden from students)';
+$string['occ_time'] = 'Time';
 $string['occ_status'] = 'Status';
 $string['occ_upcoming'] = 'Upcoming';
 $string['occurrences'] = 'Occurrences';

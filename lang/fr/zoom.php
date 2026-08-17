@@ -99,6 +99,7 @@ $string['occ_recording_hidden'] = '(masqué pour les étudiant·e·s)';
 $string['occ_remove'] = 'Retirer de la liste';
 $string['occ_revert'] = 'Rétablir';
 $string['occ_removed_notify'] = 'Occurrence retirée de la liste.';
+$string['occ_time'] = 'Heure';
 $string['occ_status'] = 'Statut';
 $string['occ_upcoming'] = 'À venir';
 $string['occurrences'] = 'Occurrences';

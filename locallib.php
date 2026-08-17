@@ -1758,6 +1758,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     $table->id = 'zoom_occurrence_table';
     $table->head = [
         get_string('occ_date', 'mod_zoom'),
+        get_string('occ_time', 'mod_zoom'),
         get_string('occ_duration', 'mod_zoom'),
         get_string('occ_status', 'mod_zoom'),
     ];
@@ -1792,30 +1793,31 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     // locale, whatever Moodle's language is). The weekday label makes the
     // schedule validatable at a glance; mod_zoom/occurrences JS keeps it in
     // step while the date is being edited.
+    // [date part, time part] — rendered in separate table columns. The
+    // weekday rides inside the date field as an input-group prefix (a
+    // native date input cannot display it in its own text).
     $slotinputs = function ($formid, $epoch) {
         [$local] = zoom_pooled_local_start($epoch);
         $time = substr($local, 11, 5);
-        // The weekday rides inside the field as an input-group prefix — a
-        // native date input cannot display it in its own text.
-        $html = html_writer::start_div('input-group d-inline-flex w-auto mr-1 align-middle');
-        $html .= html_writer::div(
+        $datehtml = html_writer::start_div('input-group d-inline-flex w-auto align-middle');
+        $datehtml .= html_writer::div(
             html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', ['data-zoom-occ-weekday' => 1]),
             'input-group-prepend'
         );
-        $html .= html_writer::empty_tag('input', [
+        $datehtml .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'newdate', 'form' => $formid,
             'value' => substr($local, 0, 10), 'required' => 'required',
             'class' => 'form-control w-auto zoom-occ-date',
         ]);
-        $html .= html_writer::end_div();
-        $html .= html_writer::select(
+        $datehtml .= html_writer::end_div();
+        $timehtml = html_writer::select(
             zoom_pooled_time_options($time),
             'newtime',
             $time,
             false,
             ['form' => $formid, 'class' => 'custom-select d-inline-block w-auto']
         );
-        return $html;
+        return [$datehtml, $timehtml];
     };
 
     $now = time();
@@ -1828,9 +1830,11 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             $lastactive = $row;
         }
 
-        $datetext = userdate($row->starttime, get_string('strftimedaydatetime', 'langconfig'));
+        $datetext = userdate($row->starttime, get_string('strftimedaydate', 'langconfig'));
+        $timetext = userdate($row->starttime, get_string('strftimetime24', 'langconfig'));
         if ($cancelled) {
             $datetext = html_writer::tag('s', $datetext);
+            $timetext = html_writer::tag('s', $timetext);
             $status = html_writer::span(get_string('occ_cancelled', 'mod_zoom'), 'badge badge-secondary text-muted');
         } else if ($past) {
             $status = html_writer::span(get_string('occ_past', 'mod_zoom'), 'badge badge-light');
@@ -1840,7 +1844,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
 
         if ($editable) {
             $formid = 'zoom-occ-move-' . $row->occurrenceid;
-            $datecell = $slotinputs($formid, (int) $row->starttime);
+            [$datecell, $timecell] = $slotinputs($formid, (int) $row->starttime);
             $durationcell = html_writer::empty_tag('input', [
                 'type' => 'number', 'name' => 'newduration', 'form' => $formid,
                 'value' => (int) round(($row->duration ?: $zoom->duration) / 60), 'min' => 1, 'max' => 1440,
@@ -1848,10 +1852,11 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             ]) . ' min';
         } else {
             $datecell = $datetext;
+            $timecell = $timetext;
             $durationcell = $cancelled ? '' : format_time((int) ($row->duration ?: $zoom->duration));
         }
 
-        $cells = [$datecell, $durationcell, $status];
+        $cells = [$datecell, $timecell, $durationcell, $status];
 
         if (!empty($recordingsbyday) || $iszoommanager) {
             $links = [];
@@ -1917,7 +1922,8 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         $html .= html_writer::start_tag('details', ['class' => 'mb-2']);
         $html .= html_writer::tag('summary', get_string('occ_add', 'mod_zoom'), ['class' => 'btn btn-secondary']);
         $html .= html_writer::start_div('p-2');
-        $html .= $slotinputs('zoom-occ-add', $adddefault);
+        [$adddate, $addtime] = $slotinputs('zoom-occ-add', $adddefault);
+        $html .= $adddate . ' ' . $addtime;
         $html .= ' ' . html_writer::empty_tag('input', [
             'type' => 'number', 'name' => 'newduration', 'form' => 'zoom-occ-add',
             'value' => $adddurationdefault, 'min' => 1, 'max' => 1440,
