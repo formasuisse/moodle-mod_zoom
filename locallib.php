@@ -1758,7 +1758,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     $table->id = 'zoom_occurrence_table';
     $table->head = [
         get_string('occ_date', 'mod_zoom'),
-        get_string('duration', 'zoom'),
+        get_string('occ_duration', 'mod_zoom'),
         get_string('occ_status', 'mod_zoom'),
     ];
     if (!empty($recordingsbyday) || $iszoommanager) {

@@ -78,6 +78,7 @@ $string['occ_cancel_confirm'] = 'Annuler l\'occurrence du {$a} ? Elle reste affi
 $string['occ_cancelled'] = 'Annulée';
 $string['occ_cancelled_notify'] = 'Occurrence annulée.';
 $string['occ_date'] = 'Date';
+$string['occ_duration'] = 'Durée';
 $string['occ_delete'] = 'Supprimer';
 $string['occ_delete_confirm_btn'] = 'Confirmer la suppression';
 $string['occ_delete_confirm'] = 'Supprimer l\'occurrence du {$a} ? Elle disparaît complètement de la liste — à utiliser pour les dates qui n\'ont jamais été réellement planifiées. (Pour annuler visiblement une occurrence planifiée, utilisez Annuler.)';
