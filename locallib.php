@@ -1770,6 +1770,10 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     }
 
     $canedit = $iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS;
+    if ($canedit) {
+        global $PAGE;
+        $PAGE->requires->js_call_amd('mod_zoom/occurrences', 'init');
+    }
     // Inputs live in table cells while their <form> sits in the actions cell
     // — tied together by the HTML5 form="" attribute (no JS, valid nesting).
     $formhiddens = function ($formid, $action, $occurrenceid = '') use ($cm) {
@@ -1785,11 +1789,14 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     };
     // Date input (native calendar — weekdays visible) + 24h time select
     // (a native time input would render AM/PM under an English browser
-    // locale, whatever Moodle's language is).
+    // locale, whatever Moodle's language is). The weekday label makes the
+    // schedule validatable at a glance; mod_zoom/occurrences JS keeps it in
+    // step while the date is being edited.
     $slotinputs = function ($formid, $epoch) {
         [$local] = zoom_pooled_local_start($epoch);
         $time = substr($local, 11, 5);
-        $html = html_writer::empty_tag('input', [
+        $html = html_writer::span(userdate($epoch, '%a'), 'zoom-occ-weekday mr-1', ['data-zoom-occ-weekday' => 1]);
+        $html .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'newdate', 'form' => $formid,
             'value' => substr($local, 0, 10), 'required' => 'required',
             'class' => 'form-control d-inline-block w-auto mr-1',
@@ -1861,9 +1868,15 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             if ($editable) {
                 $formid = 'zoom-occ-move-' . $row->occurrenceid;
                 $actions .= $formhiddens($formid, 'move', $row->occurrenceid);
+                // Grey while the row matches the stored schedule, primary
+                // when dirty; Revert discards the edit (mod_zoom/occurrences).
                 $actions .= html_writer::empty_tag('input', [
                     'type' => 'submit', 'value' => get_string('savechanges'),
                     'class' => 'btn btn-secondary btn-sm mr-1',
+                ]);
+                $actions .= html_writer::tag('button', get_string('occ_revert', 'mod_zoom'), [
+                    'type' => 'button', 'data-zoom-occ-revert' => 1,
+                    'class' => 'btn btn-link btn-sm d-none',
                 ]);
                 $actions .= html_writer::end_tag('form');
                 $actions .= ' ' . html_writer::link(new moodle_url('/mod/zoom/occurrence.php', [
@@ -1907,6 +1920,10 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             . html_writer::empty_tag('input', [
                 'type' => 'submit', 'value' => get_string('occ_add', 'mod_zoom'),
                 'class' => 'btn btn-primary btn-sm ml-2',
+            ])
+            . html_writer::tag('button', get_string('cancel'), [
+                'type' => 'button', 'data-zoom-occ-close' => 1,
+                'class' => 'btn btn-link btn-sm',
             ])
             . html_writer::end_tag('form');
         $html .= html_writer::end_div();
