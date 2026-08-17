@@ -1876,15 +1876,27 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
                         $label .= ' ' . userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'));
                     }
 
-                    if ($iszoommanager && intval($recording->showrecording) !== 1) {
-                        $label .= ' ' . get_string('occ_recording_hidden', 'mod_zoom');
-                    }
-
-                    $links[] = html_writer::link($url, $label, [
+                    $hidden = intval($recording->showrecording) !== 1;
+                    $link = html_writer::link($url, $label, [
                         'target' => '_blank',
+                        'class' => $hidden ? 'text-muted' : '',
                         'title' => get_string('occ_recording_started', 'mod_zoom',
                             userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'))),
                     ]);
+                    if ($iszoommanager) {
+                        // Per-recording visibility toggle, right in the table.
+                        $toggleurl = new moodle_url('/mod/zoom/occurrence.php', [
+                            'id' => $cm->id, 'action' => 'recshow', 'recording' => $recording->id,
+                            'show' => $hidden ? 1 : 0, 'sesskey' => sesskey(),
+                        ]);
+                        $link .= ' ' . html_writer::link(
+                            $toggleurl,
+                            get_string($hidden ? 'occ_rec_show' : 'occ_rec_hide', 'mod_zoom'),
+                            ['class' => 'small']
+                        );
+                    }
+
+                    $links[] = $link;
                 }
             }
 

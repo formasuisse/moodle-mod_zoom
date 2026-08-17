@@ -92,7 +92,7 @@ function mod_zoom_occurrence_slot_params($viewurl) {
 }
 
 $occurrence = null;
-if ($action !== 'add') {
+if ($action !== 'add' && $action !== 'recshow') {
     $occurrence = $DB->get_record('zoom_occurrences', [
         'zoomid' => $zoom->id,
         'occurrenceid' => $occurrenceid,
@@ -133,6 +133,18 @@ try {
             zoom_pooled_occurrence_remove($zoom, $occurrenceid);
             redirect($viewurl, get_string('occ_removed_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
+
+        case 'recshow':
+            // Per-recording visibility toggle (Moodle-only flag), from the
+            // occurrences table — lands back on the table, unlike the
+            // recordings-page toggle.
+            require_sesskey();
+            $recordingid = required_param('recording', PARAM_INT);
+            $show = required_param('show', PARAM_INT) ? 1 : 0;
+            $DB->get_record('zoom_meeting_recordings',
+                ['id' => $recordingid, 'zoomid' => $zoom->id], 'id', MUST_EXIST);
+            $DB->set_field('zoom_meeting_recordings', 'showrecording', $show, ['id' => $recordingid]);
+            redirect($viewurl);
 
         case 'cancel':
         case 'delete':
