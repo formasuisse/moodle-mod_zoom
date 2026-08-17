@@ -32,7 +32,7 @@ define([], function() {
         init: function() {
             var lang = document.documentElement.lang || undefined;
 
-            document.querySelectorAll('input[type=date][name=newdate]').forEach(function(input) {
+            document.querySelectorAll('input.zoom-occ-date').forEach(function(input) {
                 var span = input.parentElement.querySelector('[data-zoom-occ-weekday]');
                 if (!span) {
                     return;
@@ -86,6 +86,90 @@ define([], function() {
                 }
                 refresh();
             });
+
+            var planner = document.querySelector('[data-zoom-occ-planner]');
+            if (planner) {
+                var rows = Array.prototype.slice.call(planner.querySelectorAll('[data-zoom-occ-row]'));
+                var dateOf = function(row) {
+                    return row.querySelector('input[name="zoomplan_date[]"]');
+                };
+                var timeOf = function(row) {
+                    return row.querySelector('input[name="zoomplan_time[]"]');
+                };
+                var refreshWeekday = function(row) {
+                    dateOf(row).dispatchEvent(new Event('input'));
+                };
+                rows.forEach(function(row) {
+                    if (dateOf(row).value) {
+                        row.classList.remove('d-none');
+                        refreshWeekday(row);
+                    }
+                });
+                var buttons = planner.querySelector('.zoom-occ-planner-buttons');
+                if (buttons) {
+                    buttons.classList.remove('d-none');
+                }
+                var nextFree = function() {
+                    for (var i = 0; i < rows.length; i++) {
+                        if (!dateOf(rows[i]).value) {
+                            rows[i].classList.remove('d-none');
+                            return rows[i];
+                        }
+                    }
+                    return null;
+                };
+                var lastFilled = function() {
+                    var found = null;
+                    rows.forEach(function(row) {
+                        if (dateOf(row).value) {
+                            found = row;
+                        }
+                    });
+                    return found;
+                };
+                var addrow = planner.querySelector('[data-zoom-occ-addrow]');
+                if (addrow) {
+                    addrow.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        var row = nextFree();
+                        if (row) {
+                            dateOf(row).focus();
+                        }
+                    });
+                }
+                planner.querySelectorAll('[data-zoom-occ-bulk]').forEach(function(button) {
+                    button.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        var base = lastFilled();
+                        if (!base) {
+                            return;
+                        }
+                        var kind = button.getAttribute('data-zoom-occ-bulk');
+                        var baseDate = new Date(dateOf(base).value + 'T12:00:00');
+                        var baseTime = timeOf(base).value;
+                        for (var i = 1; i <= 5; i++) {
+                            var row = nextFree();
+                            if (!row) {
+                                return;
+                            }
+                            var d = new Date(baseDate.getTime());
+                            if (kind === 'daily') {
+                                d.setDate(d.getDate() + i);
+                            } else if (kind === 'weekly') {
+                                d.setDate(d.getDate() + 7 * i);
+                            } else {
+                                d.setMonth(d.getMonth() + i);
+                            }
+                            var pad = function(n) {
+                                return (n < 10 ? '0' : '') + n;
+                            };
+                            dateOf(row).value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+                            timeOf(row).value = baseTime;
+                            refreshWeekday(row);
+                        }
+                    });
+                });
+            }
 
             document.querySelectorAll('[data-zoom-occ-close]').forEach(function(button) {
                 button.addEventListener('click', function(e) {

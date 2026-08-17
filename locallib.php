@@ -1799,7 +1799,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         $html .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'newdate', 'form' => $formid,
             'value' => substr($local, 0, 10), 'required' => 'required',
-            'class' => 'form-control d-inline-block w-auto mr-1',
+            'class' => 'form-control d-inline-block w-auto mr-1 zoom-occ-date',
         ]);
         $html .= html_writer::select(
             zoom_pooled_time_options($time),
@@ -2007,6 +2007,100 @@ function zoom_pooled_apply_plan($zoom, array $occurrences, array $dates, $durati
     }
 
     return zoom_pooled_refresh_from_zoom($zoom);
+}
+
+/**
+ * The plain-HTML occurrence planner for the create form.
+ *
+ * Rendered inside a 'static' form element: formslib outputs static HTML
+ * verbatim, which sidesteps custom-QuickForm-element rendering entirely
+ * (a raw PEAR element degraded the whole form to the legacy renderer and
+ * scattered duplicated inputs — 2026-08-17). The inputs are read back via
+ * optional_param_array() in the form's validation()/data_postprocessing().
+ *
+ * Row 1 is the first occurrence; empty date = row skipped. The
+ * mod_zoom/occurrences module reveals rows on demand and fills bulk
+ * patterns (+5 daily/weekly/monthly).
+ *
+ * @param int $rows Total rows rendered (hidden until used).
+ * @return string HTML.
+ */
+function zoom_pooled_planner_html($rows = 30) {
+    $defaultstart = time() + 3600;
+    $defaultdate = date('Y-m-d', $defaultstart);
+    $defaulttime = sprintf('%02d:%02d', date('H', $defaultstart), 15 * floor(date('i', $defaultstart) / 15));
+
+    $html = html_writer::start_div('zoom-occ-planner', ['data-zoom-occ-planner' => 1]);
+    for ($i = 0; $i < $rows; $i++) {
+        $first = ($i === 0);
+        $html .= html_writer::start_div('mb-1 zoom-occ-planner-row' . ($first ? '' : ' d-none'), [
+            'data-zoom-occ-row' => $i,
+        ]);
+        $html .= html_writer::span(
+            $first ? get_string('firstsession', 'mod_zoom') : get_string('plandate', 'mod_zoom'),
+            'd-inline-block text-muted',
+            ['style' => 'width:11em']
+        );
+        $html .= html_writer::span('', 'zoom-occ-weekday mr-1', ['data-zoom-occ-weekday' => 1]);
+        $html .= html_writer::empty_tag('input', [
+            'type' => 'date', 'name' => 'zoomplan_date[]',
+            'value' => $first ? $defaultdate : '',
+            'class' => 'form-control d-inline-block w-auto mr-1 zoom-occ-date',
+        ]);
+        $html .= html_writer::empty_tag('input', [
+            'type' => 'text', 'name' => 'zoomplan_time[]',
+            'value' => $first ? $defaulttime : '',
+            'size' => 5, 'maxlength' => 5, 'placeholder' => 'HH:MM',
+            'pattern' => '([01][0-9]|2[0-3]):[0-5][0-9]',
+            'class' => 'form-control d-inline-block w-auto',
+        ]);
+        $html .= html_writer::end_div();
+    }
+
+    $buttons = [
+        ['data-zoom-occ-addrow' => 1, 'label' => get_string('occ_planner_addrow', 'mod_zoom')],
+        ['data-zoom-occ-bulk' => 'daily', 'label' => get_string('occ_planner_daily', 'mod_zoom')],
+        ['data-zoom-occ-bulk' => 'weekly', 'label' => get_string('occ_planner_weekly', 'mod_zoom')],
+        ['data-zoom-occ-bulk' => 'monthly', 'label' => get_string('occ_planner_monthly', 'mod_zoom')],
+    ];
+    $html .= html_writer::start_div('mt-1 zoom-occ-planner-buttons d-none');
+    foreach ($buttons as $button) {
+        $label = $button['label'];
+        unset($button['label']);
+        $html .= html_writer::tag('button', $label, $button + [
+            'type' => 'button', 'class' => 'btn btn-secondary btn-sm mr-1',
+        ]);
+    }
+
+    $html .= html_writer::end_div();
+    $html .= html_writer::end_div();
+    return $html;
+}
+
+/**
+ * Read the planner rows from the submitted request.
+ *
+ * The planner lives in a static element, so its inputs are not part of the
+ * moodleform data — they are read straight from the request. Rows with an
+ * empty date are skipped; a filled row that does not parse yields 0 (the
+ * caller reports it).
+ *
+ * @return array [int[] epochs ordered as submitted (0 = unparseable row),
+ *                bool whether any row was submitted at all]
+ */
+function zoom_pooled_planner_submitted() {
+    $dates = optional_param_array('zoomplan_date', [], PARAM_RAW_TRIMMED);
+    $times = optional_param_array('zoomplan_time', [], PARAM_RAW_TRIMMED);
+    $epochs = [];
+    foreach ($dates as $i => $date) {
+        if (trim($date) === '') {
+            continue;
+        }
+
+        $epochs[$i] = zoom_pooled_parse_local(trim($date) . ' ' . trim($times[$i] ?? ''));
+    }
+
+    return [$epochs, !empty($dates)];
 }
 
 /**

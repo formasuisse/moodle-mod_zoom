@@ -30,12 +30,6 @@ defined('MOODLE_INTERNAL') || die();
 require_once($CFG->dirroot . '/course/moodleform_mod.php');
 require_once($CFG->dirroot . '/mod/zoom/lib.php');
 require_once($CFG->dirroot . '/mod/zoom/locallib.php');
-// Parents of the occurrence slot-picker elements defined at the bottom of
-// this file: both are lazily loaded by QuickForm's element registry, so
-// nothing guarantees they exist when this file is parsed ("Class
-// HTML_QuickForm_input not found" otherwise, context-dependent).
-require_once($CFG->libdir . '/pear/HTML/QuickForm/input.php');
-require_once($CFG->libdir . '/form/group.php');
 
 /**
  * Module instance settings form
@@ -270,28 +264,23 @@ class mod_zoom_mod_form extends moodleform_mod {
 
         if (!$pooled || $isnew) {
             if ($pooled) {
-                // Occurrence-first: native datetime-local inputs — a real
-                // calendar picker showing weekdays, far easier for planning
-                // specific weekdays than the dropdown date_time_selector.
-                // Posted as local wall-clock strings; converted to epochs in
-                // data_postprocessing() (site timezone, like every Zoom
-                // write).
-                MoodleQuickForm::registerElementType(
-                    'zoomdatetimelocal',
-                    __FILE__,
-                    'mod_zoom_datetimelocal_form_element'
+                // Occurrence-first: the plan is laid date by date in a
+                // plain-HTML planner inside a static element (native date
+                // pickers — weekdays visible — and 24h HH:MM times; a
+                // custom QuickForm element degraded the whole form to the
+                // legacy renderer, 2026-08-17). Its inputs travel outside
+                // the moodleform data and are read back via
+                // zoom_pooled_planner_submitted() in validation() and
+                // data_postprocessing(). The mod_zoom/occurrences module
+                // adds row-reveal, weekday labels and the +5
+                // daily/weekly/monthly bulk fills.
+                $PAGE->requires->js_call_amd('mod_zoom/occurrences', 'init');
+                $mform->addElement(
+                    'static',
+                    'plandatesplanner',
+                    get_string('occurrences', 'mod_zoom'),
+                    get_string('plandatesintro', 'mod_zoom') . zoom_pooled_planner_html()
                 );
-                MoodleQuickForm::registerElementType(
-                    'zoomdateinput',
-                    __FILE__,
-                    'mod_zoom_dateinput_form_element'
-                );
-                $mform->addElement('zoomdatetimelocal', 'start_time', get_string('firstsession', 'mod_zoom'));
-                $defaultstart = time() + 3600;
-                $mform->setDefault('start_time', [
-                    'date' => date('Y-m-d', $defaultstart),
-                    'time' => sprintf('%02d:%02d', date('H', $defaultstart), 15 * floor(date('i', $defaultstart) / 15)),
-                ]);
             } else {
                 // Add date/time. Validation in validation().
                 $starttimeoptions = [
@@ -319,33 +308,6 @@ class mod_zoom_mod_form extends moodleform_mod {
             }
             // Duration needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
             // Moved this control to javascript, rather than using disabledIf.
-        }
-
-        if ($pooled && $isnew) {
-            // Pooled-hosts feature (occurrence-first scheduling): no
-            // recurrence rule — the plan is laid date by date (first session
-            // above + additional dates below), every session sharing one
-            // join link and one recordings archive. The host is picked to
-            // fit the WHOLE plan at save time; each date can later be moved
-            // or cancelled individually in the occurrence table.
-            $mform->addElement('static', 'plandatesintro', '', get_string('plandatesintro', 'mod_zoom'));
-            $repeatarray = [
-                $mform->createElement(
-                    'zoomdatetimelocal',
-                    'plandates',
-                    get_string('plandate', 'mod_zoom')
-                ),
-            ];
-            $this->repeat_elements(
-                $repeatarray,
-                1,
-                [],
-                'plandates_repeats',
-                'plandates_add_fields',
-                5,
-                get_string('plandatesadd', 'mod_zoom'),
-                true
-            );
         }
 
         // The stock recurrence rule UI is meaningless in pooled mode — the
@@ -1076,24 +1038,16 @@ class mod_zoom_mod_form extends moodleform_mod {
 
         parent::data_postprocessing($data);
 
-        // Pooled occurrence-first: the slot pickers post local wall-clock
-        // pairs ['date' => 'Y-m-d', 'time' => 'HH:MM'] — convert to epochs
-        // (site timezone, the same one every Zoom write uses). Unused plan
-        // rows post an empty date.
+        // Pooled occurrence-first: the planner posts local wall-clock rows
+        // outside the moodleform data — read them back and hand lib.php the
+        // epochs (site timezone, the same one every Zoom write uses).
         if (zoom_pooled_group() !== null) {
-            $combine = function ($raw) {
-                if (is_array($raw)) {
-                    $raw = trim(($raw['date'] ?? '') . ' ' . ($raw['time'] ?? ''));
-                }
-
-                return is_string($raw) ? zoom_pooled_parse_local($raw) : (int) $raw;
-            };
-            if (isset($data->start_time) && !is_int($data->start_time)) {
-                $data->start_time = $combine($data->start_time);
-            }
-
-            if (isset($data->plandates)) {
-                $data->plandates = array_map($combine, (array) $data->plandates);
+            [$epochs, $submitted] = zoom_pooled_planner_submitted();
+            if ($submitted) {
+                $epochs = array_values(array_filter($epochs));
+                sort($epochs);
+                $data->start_time = $epochs[0] ?? 0;
+                $data->plandates = array_slice($epochs, 1);
             }
         }
 
@@ -1296,68 +1250,58 @@ class mod_zoom_mod_form extends moodleform_mod {
         }
 
         // Pooled-hosts feature (occurrence-first scheduling): validate the
-        // whole plan — parseable dates in the future and unique, and (for a
-        // new meeting) a pool host free for EVERY planned slot, so placement
-        // is batch-shaped and a later "wrong host" discovery cannot happen.
-        // The datetime-local inputs arrive as local wall-clock strings here
-        // (data_postprocessing converts them only on successful submission).
-        if (zoom_pooled_group() !== null && empty($data['webinar']) && isset($data['start_time'])) {
-            $parse = function ($value) {
-                if (is_array($value)) {
-                    // Slot-picker group value: ['date' => 'Y-m-d', 'time' => 'HH:MM'].
-                    $value = trim(($value['date'] ?? '') . ' ' . ($value['time'] ?? ''));
-                }
-
-                return is_string($value) ? zoom_pooled_parse_local($value) : (int) $value;
-            };
-            $planduration = (int) ($data['duration'] ?? 0) ?: HOURSECS;
+        // whole plan from the planner inputs (they live in a static element,
+        // outside the moodleform data) — parseable future dates, unique, and
+        // (for a new meeting) a pool host free for EVERY planned slot, so
+        // placement is batch-shaped and a later "wrong host" discovery
+        // cannot happen.
+        if (zoom_pooled_group() !== null && empty($data['webinar'])) {
+            [$epochs, $submitted] = zoom_pooled_planner_submitted();
             $isnew = ($data['meeting_id'] ?? -1) < 0;
-
-            $starttime = $parse($data['start_time']);
-            if ($isnew) {
-                if ($starttime <= 0) {
-                    $errors['start_time'] = get_string('occ_err_baddate', 'mod_zoom');
-                } else if ($starttime < time()) {
-                    $errors['start_time'] = get_string('err_start_time_past', 'zoom');
-                }
-            }
-
-            $plan = [$starttime => true];
-            foreach ((array) ($data['plandates'] ?? []) as $i => $raw) {
-                if (is_array($raw) && trim($raw['date'] ?? '') === '') {
-                    continue; // Unused plan row (no date picked).
+            if ($submitted && $isnew) {
+                if (($data['duration'] ?? 0) <= 0) {
+                    $errors['duration'] = get_string('err_duration_nonpositive', 'zoom');
+                } else if ($data['duration'] > 150 * 60 * 60) {
+                    $errors['duration'] = get_string('err_duration_too_long', 'zoom');
                 }
 
-                if (is_string($raw) && trim($raw) === '') {
-                    continue; // Unused plan row.
+                $planduration = (int) ($data['duration'] ?? 0) ?: HOURSECS;
+                $rowerrors = [];
+                if (empty($epochs)) {
+                    $rowerrors[] = get_string('occ_err_baddate', 'mod_zoom');
                 }
 
-                $date = $parse($raw);
-                if ($date <= 0) {
-                    $errors["plandates[$i]"] = get_string('occ_err_baddate', 'mod_zoom');
-                } else if ($date < time()) {
-                    $errors["plandates[$i]"] = get_string('err_start_time_past', 'zoom');
-                } else if (isset($plan[$date])) {
-                    $errors["plandates[$i]"] = get_string('err_plandate_duplicate', 'mod_zoom');
+                $plan = [];
+                foreach ($epochs as $i => $epoch) {
+                    $row = $i + 1;
+                    if ($epoch <= 0) {
+                        $rowerrors[] = "#$row: " . get_string('occ_err_baddate', 'mod_zoom');
+                    } else if ($epoch < time()) {
+                        $rowerrors[] = "#$row: " . get_string('err_start_time_past', 'zoom');
+                    } else if (isset($plan[$epoch])) {
+                        $rowerrors[] = "#$row: " . get_string('err_plandate_duplicate', 'mod_zoom');
+                    }
+
+                    $plan[$epoch] = true;
                 }
 
-                $plan[$date] = true;
-            }
-
-            if (empty($errors) && $isnew) {
-                $dates = array_keys($plan);
-                sort($dates);
-                $slots = array_map(function ($date) use ($planduration) {
-                    return [$date, $planduration];
-                }, $dates);
-                try {
-                    zoom_pooled_pick_host((object) [
-                        'meeting_id' => -1,
-                        'registration' => $data['registration'] ?? null,
-                        'teacherid' => $data['teacherid'] ?? null,
-                    ], $slots, $this->context);
-                } catch (moodle_exception $e) {
-                    $errors['start_time'] = get_string('err_plan_no_host', 'mod_zoom');
+                if (!empty($rowerrors)) {
+                    $errors['plandatesplanner'] = implode(' ', $rowerrors);
+                } else {
+                    $dates = array_keys($plan);
+                    sort($dates);
+                    $slots = array_map(function ($date) use ($planduration) {
+                        return [$date, $planduration];
+                    }, $dates);
+                    try {
+                        zoom_pooled_pick_host((object) [
+                            'meeting_id' => -1,
+                            'registration' => $data['registration'] ?? null,
+                            'teacherid' => $data['teacherid'] ?? null,
+                        ], $slots, $this->context);
+                    } catch (moodle_exception $e) {
+                        $errors['plandatesplanner'] = get_string('err_plan_no_host', 'mod_zoom');
+                    }
                 }
             }
         }
@@ -1494,67 +1438,5 @@ class mod_zoom_mod_form extends moodleform_mod {
         }
 
         return $errors;
-    }
-}
-
-/**
- * Native date input (occurrence-first scheduling): a real calendar picker
- * that shows weekdays. Used inside mod_zoom_datetimelocal_form_element.
- */
-class mod_zoom_dateinput_form_element extends HTML_QuickForm_input {
-    /**
-     * Constructor.
-     *
-     * @param ?string $elementname Element name.
-     * @param ?string $elementlabel Element label.
-     * @param ?array $attributes Extra attributes.
-     */
-    public function __construct($elementname = null, $elementlabel = null, $attributes = null) {
-        if (!is_array($attributes)) {
-            $attributes = [];
-        }
-
-        $attributes['class'] = trim(($attributes['class'] ?? '') . ' form-control');
-        parent::__construct($elementname, $elementlabel, $attributes);
-        $this->setType('date');
-    }
-}
-
-/**
- * Occurrence slot picker (occurrence-first scheduling): a native date input
- * (calendar with weekdays — far easier for planning specific weekdays than
- * the dropdown date_time_selector) plus a 24h time select (a native time
- * input renders AM/PM under an English browser locale, whatever Moodle's
- * language is). Value shape: ['date' => 'Y-m-d', 'time' => 'HH:MM'] —
- * parsed in validation(), converted to an epoch in data_postprocessing().
- */
-class mod_zoom_datetimelocal_form_element extends MoodleQuickForm_group {
-    /**
-     * Constructor.
-     *
-     * @param ?string $elementname Element name.
-     * @param ?string $elementlabel Element label.
-     * @param ?array $attributes Extra attributes (unused).
-     */
-    public function __construct($elementname = null, $elementlabel = null, $attributes = null) {
-        parent::__construct($elementname, $elementlabel);
-        $this->_persistantFreeze = true;
-        $this->_appendName = true;
-        $this->_type = 'zoomdatetimelocal';
-    }
-
-    /**
-     * Builds the date input + 24h time select pair.
-     */
-    public function _createElements() {
-        $this->_elements = [];
-        $this->_elements[] = new mod_zoom_dateinput_form_element('date', '', ['class' => 'd-inline-block w-auto mr-1']);
-        $this->_elements[] = $this->createFormElement(
-            'select',
-            'time',
-            '',
-            zoom_pooled_time_options(),
-            ['class' => 'custom-select d-inline-block w-auto']
-        );
     }
 }
