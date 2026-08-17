@@ -224,7 +224,6 @@ $string['err_plandate_duplicate'] = 'This session date is listed twice.';
 $string['firstsession'] = 'First occurrence';
 $string['occ_add'] = 'Add';
 $string['occ_added_notify'] = 'Occurrence added.';
-$string['occ_addnew'] = 'New occurrence';
 $string['occ_cancel'] = 'Cancel';
 $string['occ_cancel_confirm'] = 'Cancel the occurrence of {$a}? It stays listed as cancelled so students see the change. Its slot on the host is freed; the cancellation is permanent on Zoom.';
 $string['occ_cancelled'] = 'Cancelled';

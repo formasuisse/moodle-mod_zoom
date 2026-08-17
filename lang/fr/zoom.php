@@ -72,7 +72,6 @@ $string['event_occurrence_conflict'] = 'Conflit d\'occurrence Zoom détecté';
 $string['firstsession'] = 'Première occurrence';
 $string['occ_add'] = 'Ajouter';
 $string['occ_added_notify'] = 'Occurrence ajoutée.';
-$string['occ_addnew'] = 'Nouvelle occurrence';
 $string['occ_cancel'] = 'Annuler';
 $string['occ_cancel_confirm'] = 'Annuler l\'occurrence du {$a} ? Elle reste affichée comme annulée afin que les étudiant·e·s voient le changement. Son créneau est libéré sur l\'hôte ; l\'annulation est définitive côté Zoom.';
 $string['occ_cancelled'] = 'Annulée';

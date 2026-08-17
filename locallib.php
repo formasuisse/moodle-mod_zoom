@@ -1783,9 +1783,25 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         $html .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
         return $html;
     };
-    $localinput = function ($epoch) {
+    // Date input (native calendar — weekdays visible) + 24h time select
+    // (a native time input would render AM/PM under an English browser
+    // locale, whatever Moodle's language is).
+    $slotinputs = function ($formid, $epoch) {
         [$local] = zoom_pooled_local_start($epoch);
-        return substr($local, 0, 16); // Y-m-d\TH:i for <input type="datetime-local">.
+        $time = substr($local, 11, 5);
+        $html = html_writer::empty_tag('input', [
+            'type' => 'date', 'name' => 'newdate', 'form' => $formid,
+            'value' => substr($local, 0, 10), 'required' => 'required',
+            'class' => 'form-control d-inline-block w-auto mr-1',
+        ]);
+        $html .= html_writer::select(
+            zoom_pooled_time_options($time),
+            'newtime',
+            $time,
+            false,
+            ['form' => $formid, 'class' => 'custom-select d-inline-block w-auto']
+        );
+        return $html;
     };
 
     $now = time();
@@ -1810,11 +1826,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
 
         if ($editable) {
             $formid = 'zoom-occ-move-' . $row->occurrenceid;
-            $datecell = html_writer::empty_tag('input', [
-                'type' => 'datetime-local', 'name' => 'newdatetime', 'form' => $formid,
-                'value' => $localinput((int) $row->starttime), 'required' => 'required',
-                'class' => 'form-control d-inline-block w-auto',
-            ]);
+            $datecell = $slotinputs($formid, (int) $row->starttime);
             $durationcell = html_writer::empty_tag('input', [
                 'type' => 'number', 'name' => 'newduration', 'form' => $formid,
                 'value' => (int) round(($row->duration ?: $zoom->duration) / 60), 'min' => 1, 'max' => 1440,
@@ -1873,39 +1885,34 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         $table->data[] = $cells;
     }
 
-    // Inline add row: prefilled one week after the last active session.
-    if ($canedit) {
-        $adddefault = $lastactive ? ((int) $lastactive->starttime + WEEKSECS) : ($now + DAYSECS);
-        $adddurationdefault = (int) round((($lastactive->duration ?? 0) ?: $zoom->duration) / 60);
-        $addcells = [
-            html_writer::empty_tag('input', [
-                'type' => 'datetime-local', 'name' => 'newdatetime', 'form' => 'zoom-occ-add',
-                'value' => $localinput($adddefault), 'required' => 'required',
-                'class' => 'form-control d-inline-block w-auto',
-            ]),
-            html_writer::empty_tag('input', [
-                'type' => 'number', 'name' => 'newduration', 'form' => 'zoom-occ-add',
-                'value' => $adddurationdefault, 'min' => 1, 'max' => 1440,
-                'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
-            ]) . ' min',
-            html_writer::span(get_string('occ_addnew', 'mod_zoom'), 'text-muted'),
-        ];
-        if (!empty($recordingsbyday) || $iszoommanager) {
-            $addcells[] = '';
-        }
-
-        $addcells[] = $formhiddens('zoom-occ-add', 'add')
-            . html_writer::empty_tag('input', [
-                'type' => 'submit', 'value' => get_string('occ_add', 'mod_zoom'),
-                'class' => 'btn btn-primary btn-sm',
-            ])
-            . html_writer::end_tag('form');
-        $table->data[] = $addcells;
-    }
-
     $html = $OUTPUT->box_start('', 'zoom_section-occurrences');
     $html .= $OUTPUT->heading(get_string('occurrences', 'mod_zoom'), 3);
     $html .= html_writer::table($table);
+
+    // Collapsed add form (native <details>, no JS): the inputs only appear
+    // once "Add an occurrence" is clicked.
+    if ($canedit) {
+        $adddefault = $lastactive ? ((int) $lastactive->starttime + WEEKSECS) : ($now + DAYSECS);
+        $adddurationdefault = (int) round((($lastactive->duration ?? 0) ?: $zoom->duration) / 60);
+        $html .= html_writer::start_tag('details', ['class' => 'mb-2']);
+        $html .= html_writer::tag('summary', get_string('occ_add', 'mod_zoom'), ['class' => 'btn btn-secondary']);
+        $html .= html_writer::start_div('p-2');
+        $html .= $slotinputs('zoom-occ-add', $adddefault);
+        $html .= ' ' . html_writer::empty_tag('input', [
+            'type' => 'number', 'name' => 'newduration', 'form' => 'zoom-occ-add',
+            'value' => $adddurationdefault, 'min' => 1, 'max' => 1440,
+            'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
+        ]) . ' min ';
+        $html .= $formhiddens('zoom-occ-add', 'add')
+            . html_writer::empty_tag('input', [
+                'type' => 'submit', 'value' => get_string('occ_add', 'mod_zoom'),
+                'class' => 'btn btn-primary btn-sm ml-2',
+            ])
+            . html_writer::end_tag('form');
+        $html .= html_writer::end_div();
+        $html .= html_writer::end_tag('details');
+    }
+
     $html .= $OUTPUT->box_end();
     return $html;
 }
@@ -1986,12 +1993,39 @@ function zoom_pooled_apply_plan($zoom, array $occurrences, array $dates, $durati
 }
 
 /**
- * Parse a datetime-local wall-clock string into an epoch.
+ * 24h time options for the occurrence time dropdowns, 15-minute steps.
+ *
+ * A native time input renders AM/PM under an English browser locale
+ * whatever Moodle's language is — a select is unambiguous everywhere.
+ *
+ * @param ?string $include Off-grid value to include (e.g. an existing
+ *        occurrence at 09:05).
+ * @return array value => label ('HH:MM').
+ */
+function zoom_pooled_time_options($include = null) {
+    $options = [];
+    for ($h = 0; $h < 24; $h++) {
+        for ($m = 0; $m < 60; $m += 15) {
+            $value = sprintf('%02d:%02d', $h, $m);
+            $options[$value] = $value;
+        }
+    }
+
+    if ($include !== null && $include !== '' && !isset($options[$include])) {
+        $options[$include] = $include;
+        ksort($options);
+    }
+
+    return $options;
+}
+
+/**
+ * Parse a local wall-clock string into an epoch.
  *
  * Counterpart of zoom_pooled_local_start(): the site timezone is the one
  * every Zoom write uses, so form inputs are interpreted in it too.
  *
- * @param string $raw e.g. '2026-09-07T09:00'.
+ * @param string $raw e.g. '2026-09-07T09:00' or '2026-09-07 09:00'.
  * @return int Unix timestamp, or 0 when the string cannot be parsed.
  */
 function zoom_pooled_parse_local($raw) {

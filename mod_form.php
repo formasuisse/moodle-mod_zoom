@@ -275,10 +275,17 @@ class mod_zoom_mod_form extends moodleform_mod {
                     __FILE__,
                     'mod_zoom_datetimelocal_form_element'
                 );
+                MoodleQuickForm::registerElementType(
+                    'zoomdateinput',
+                    __FILE__,
+                    'mod_zoom_dateinput_form_element'
+                );
                 $mform->addElement('zoomdatetimelocal', 'start_time', get_string('firstsession', 'mod_zoom'));
-                $mform->setType('start_time', PARAM_RAW_TRIMMED);
-                $mform->setDefault('start_time', date('Y-m-d\TH:i', time() + 3600));
-                $mform->addRule('start_time', get_string('occ_err_baddate', 'mod_zoom'), 'required', null, 'server');
+                $defaultstart = time() + 3600;
+                $mform->setDefault('start_time', [
+                    'date' => date('Y-m-d', $defaultstart),
+                    'time' => sprintf('%02d:%02d', date('H', $defaultstart), 15 * floor(date('i', $defaultstart) / 15)),
+                ]);
             } else {
                 // Add date/time. Validation in validation().
                 $starttimeoptions = [
@@ -326,7 +333,7 @@ class mod_zoom_mod_form extends moodleform_mod {
             $this->repeat_elements(
                 $repeatarray,
                 1,
-                ['plandates' => ['type' => PARAM_RAW_TRIMMED]],
+                [],
                 'plandates_repeats',
                 'plandates_add_fields',
                 5,
@@ -1063,18 +1070,24 @@ class mod_zoom_mod_form extends moodleform_mod {
 
         parent::data_postprocessing($data);
 
-        // Pooled occurrence-first: the native datetime-local inputs post
-        // local wall-clock strings — convert to epochs (site timezone, the
-        // same one every Zoom write uses). Unused plan rows post ''.
+        // Pooled occurrence-first: the slot pickers post local wall-clock
+        // pairs ['date' => 'Y-m-d', 'time' => 'HH:MM'] — convert to epochs
+        // (site timezone, the same one every Zoom write uses). Unused plan
+        // rows post an empty date.
         if (zoom_pooled_group() !== null) {
-            if (isset($data->start_time) && is_string($data->start_time)) {
-                $data->start_time = zoom_pooled_parse_local($data->start_time);
+            $combine = function ($raw) {
+                if (is_array($raw)) {
+                    $raw = trim(($raw['date'] ?? '') . ' ' . ($raw['time'] ?? ''));
+                }
+
+                return is_string($raw) ? zoom_pooled_parse_local($raw) : (int) $raw;
+            };
+            if (isset($data->start_time) && !is_int($data->start_time)) {
+                $data->start_time = $combine($data->start_time);
             }
 
             if (isset($data->plandates)) {
-                $data->plandates = array_map(function ($raw) {
-                    return is_string($raw) ? zoom_pooled_parse_local($raw) : (int) $raw;
-                }, (array) $data->plandates);
+                $data->plandates = array_map($combine, (array) $data->plandates);
             }
         }
 
@@ -1284,6 +1297,11 @@ class mod_zoom_mod_form extends moodleform_mod {
         // (data_postprocessing converts them only on successful submission).
         if (zoom_pooled_group() !== null && empty($data['webinar']) && isset($data['start_time'])) {
             $parse = function ($value) {
+                if (is_array($value)) {
+                    // Slot-picker group value: ['date' => 'Y-m-d', 'time' => 'HH:MM'].
+                    $value = trim(($value['date'] ?? '') . ' ' . ($value['time'] ?? ''));
+                }
+
                 return is_string($value) ? zoom_pooled_parse_local($value) : (int) $value;
             };
             $planduration = (int) ($data['duration'] ?? 0) ?: HOURSECS;
@@ -1300,6 +1318,10 @@ class mod_zoom_mod_form extends moodleform_mod {
 
             $plan = [$starttime => true];
             foreach ((array) ($data['plandates'] ?? []) as $i => $raw) {
+                if (is_array($raw) && trim($raw['date'] ?? '') === '') {
+                    continue; // Unused plan row (no date picked).
+                }
+
                 if (is_string($raw) && trim($raw) === '') {
                     continue; // Unused plan row.
                 }
@@ -1470,14 +1492,10 @@ class mod_zoom_mod_form extends moodleform_mod {
 }
 
 /**
- * Native datetime-local input element (occurrence-first scheduling).
- *
- * A real calendar picker that shows weekdays — far easier for planning
- * specific weekdays than the dropdown-based date_time_selector. Values
- * travel as local wall-clock strings ('Y-m-d\TH:i'), converted to epochs in
- * the form's data_postprocessing() / parsed in validation().
+ * Native date input (occurrence-first scheduling): a real calendar picker
+ * that shows weekdays. Used inside mod_zoom_datetimelocal_form_element.
  */
-class mod_zoom_datetimelocal_form_element extends HTML_QuickForm_input {
+class mod_zoom_dateinput_form_element extends HTML_QuickForm_input {
     /**
      * Constructor.
      *
@@ -1492,6 +1510,45 @@ class mod_zoom_datetimelocal_form_element extends HTML_QuickForm_input {
 
         $attributes['class'] = trim(($attributes['class'] ?? '') . ' form-control');
         parent::__construct($elementname, $elementlabel, $attributes);
-        $this->setType('datetime-local');
+        $this->setType('date');
+    }
+}
+
+/**
+ * Occurrence slot picker (occurrence-first scheduling): a native date input
+ * (calendar with weekdays — far easier for planning specific weekdays than
+ * the dropdown date_time_selector) plus a 24h time select (a native time
+ * input renders AM/PM under an English browser locale, whatever Moodle's
+ * language is). Value shape: ['date' => 'Y-m-d', 'time' => 'HH:MM'] —
+ * parsed in validation(), converted to an epoch in data_postprocessing().
+ */
+class mod_zoom_datetimelocal_form_element extends MoodleQuickForm_group {
+    /**
+     * Constructor.
+     *
+     * @param ?string $elementname Element name.
+     * @param ?string $elementlabel Element label.
+     * @param ?array $attributes Extra attributes (unused).
+     */
+    public function __construct($elementname = null, $elementlabel = null, $attributes = null) {
+        parent::__construct($elementname, $elementlabel);
+        $this->_persistantFreeze = true;
+        $this->_appendName = true;
+        $this->_type = 'zoomdatetimelocal';
+    }
+
+    /**
+     * Builds the date input + 24h time select pair.
+     */
+    public function _createElements() {
+        $this->_elements = [];
+        $this->_elements[] = new mod_zoom_dateinput_form_element('date', '', ['class' => 'd-inline-block w-auto mr-1']);
+        $this->_elements[] = $this->createFormElement(
+            'select',
+            'time',
+            '',
+            zoom_pooled_time_options(),
+            ['class' => 'custom-select d-inline-block w-auto']
+        );
     }
 }

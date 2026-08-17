@@ -69,12 +69,13 @@ if (zoom_pooled_group() === null || !empty($zoom->webinar) || empty($zoom->recur
 function mod_zoom_occurrence_slot_params($viewurl) {
     global $CFG;
 
-    $rawdatetime = required_param('newdatetime', PARAM_RAW_TRIMMED);
+    $rawdate = required_param('newdate', PARAM_RAW_TRIMMED);
+    $rawtime = required_param('newtime', PARAM_RAW_TRIMMED);
     $minutes = required_param('newduration', PARAM_INT);
 
-    // The datetime-local input carries site-local wall clock — the same
+    // Date input + 24h time select carry site-local wall clock — the same
     // timezone every Zoom write uses (see zoom_pooled_local_start()).
-    $start = zoom_pooled_parse_local($rawdatetime);
+    $start = zoom_pooled_parse_local($rawdate . ' ' . $rawtime);
     if ($start <= 0) {
         redirect($viewurl, get_string('occ_err_baddate', 'mod_zoom'), null, \core\output\notification::NOTIFY_ERROR);
     }
