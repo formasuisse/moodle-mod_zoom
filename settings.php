@@ -236,17 +236,6 @@ if ($hassiteconfig && $ADMIN->fulltree) {
         0
     ));
 
-    // Pooled-hosts feature (occurrence-first scheduling): the occurrence
-    // table on the activity page (replaces the Schedule box; default on).
-    $settings->add(new admin_setting_configcheckbox(
-        'zoom/occurrencetable',
-        new lang_string('occurrencetable', 'mod_zoom'),
-        new lang_string('occurrencetable_desc', 'mod_zoom'),
-        1,
-        1,
-        0
-    ));
-
     // Pooled-hosts feature: recording retention. When set, the
     // purge_recordings task trashes cloud recordings on Zoom and removes
     // them from Moodle this many days after the session. 0 disables.

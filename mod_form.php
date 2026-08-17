@@ -247,81 +247,32 @@ class mod_zoom_mod_form extends moodleform_mod {
         $mform->addElement('header', 'schedule', get_string('schedule', 'mod_zoom'));
         $mform->setExpanded('schedule');
 
-        // Pooled-hosts feature (occurrence-first scheduling): the schedule
-        // of an EXISTING pooled meeting is managed occurrence by occurrence
-        // in the table on the activity page — this form carries no schedule
-        // fields at all for it (lib.php merges the stored schedule into the
-        // Zoom PATCH).
-        if ($pooled && !$isnew) {
-            $viewurl = new moodle_url('/mod/zoom/view.php', ['id' => $this->_cm->id]);
-            $mform->addElement(
-                'static',
-                'schedulemanaged',
-                '',
-                get_string('schedulemanagedintable', 'mod_zoom', $viewurl->out())
-            );
+        // Add date/time. Validation in validation().
+        $starttimeoptions = [
+            'step' => 5,
+            'defaulttime' => time() + 3600,
+        ];
+        $mform->addElement('date_time_selector', 'start_time', get_string('start_time', 'zoom'), $starttimeoptions);
+        // Start time needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
+        // Moved this control to javascript, rather than using disabledIf.
+
+        // Add duration.
+        $mform->addElement('duration', 'duration', get_string('duration', 'zoom'), ['optional' => false]);
+        // Validation in validation(). Default to one hour.
+        $mform->setDefault('duration', ['number' => 1, 'timeunit' => 3600]);
+        // Pooled-hosts feature: the slot picker and the end-of-session task
+        // need a real duration — mark it required in the form (asterisk;
+        // enforced server-side in validation()). Server validation only: a
+        // 'client' rule on a group element makes QuickForm emit JS against
+        // getElementById('id_duration'), which does not exist for groups —
+        // the resulting TypeError kills the whole generated validation
+        // script, disabling client-side validation for the entire form.
+        if (zoom_pooled_group() !== null) {
+            $mform->addRule('duration', get_string('err_duration_nonpositive', 'zoom'), 'required', null, 'server');
         }
+        // Duration needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
+        // Moved this control to javascript, rather than using disabledIf.
 
-        if (!$pooled || $isnew) {
-            // Add date/time. Validation in validation().
-            $starttimeoptions = [
-                'step' => 5,
-                'defaulttime' => time() + 3600,
-            ];
-            $starttimelabel = $pooled ? get_string('firstsession', 'mod_zoom') : get_string('start_time', 'zoom');
-            $mform->addElement('date_time_selector', 'start_time', $starttimelabel, $starttimeoptions);
-            // Start time needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
-            // Moved this control to javascript, rather than using disabledIf.
-
-            // Add duration.
-            $mform->addElement('duration', 'duration', get_string('duration', 'zoom'), ['optional' => false]);
-            // Validation in validation(). Default to one hour.
-            $mform->setDefault('duration', ['number' => 1, 'timeunit' => 3600]);
-            // Pooled-hosts feature: the slot picker and the end-of-session task
-            // need a real duration — mark it required in the form (asterisk;
-            // enforced server-side in validation()). Server validation only: a
-            // 'client' rule on a group element makes QuickForm emit JS against
-            // getElementById('id_duration'), which does not exist for groups —
-            // the resulting TypeError kills the whole generated validation
-            // script, disabling client-side validation for the entire form.
-            if ($pooled) {
-                $mform->addRule('duration', get_string('err_duration_nonpositive', 'zoom'), 'required', null, 'server');
-            }
-            // Duration needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
-            // Moved this control to javascript, rather than using disabledIf.
-        }
-
-        if ($pooled && $isnew) {
-            // Pooled-hosts feature (occurrence-first scheduling): no
-            // recurrence rule — the plan is laid date by date (first session
-            // above + additional dates below), every session sharing one
-            // join link and one recordings archive. The host is picked to
-            // fit the WHOLE plan at save time; each date can later be moved
-            // or cancelled individually in the occurrence table.
-            $mform->addElement('static', 'plandatesintro', '', get_string('plandatesintro', 'mod_zoom'));
-            $repeatarray = [
-                $mform->createElement(
-                    'date_time_selector',
-                    'plandates',
-                    get_string('plandate', 'mod_zoom'),
-                    ['optional' => true, 'step' => 5]
-                ),
-            ];
-            $this->repeat_elements(
-                $repeatarray,
-                1,
-                [],
-                'plandates_repeats',
-                'plandates_add_fields',
-                5,
-                get_string('plandatesadd', 'mod_zoom'),
-                true
-            );
-        }
-
-        // The stock recurrence rule UI is meaningless in pooled mode — the
-        // occurrence table owns the schedule (see above).
-        if (!$pooled) {
         // Add recurring widget.
         $mform->addElement(
             'advcheckbox',
@@ -441,7 +392,6 @@ class mod_zoom_mod_form extends moodleform_mod {
         $mform->setDefault('end_date_option', ZOOM_END_DATE_OPTION_BY);
         // Set default end_date_time to be 1 week in the future.
         $mform->setDefault('end_date_time', strtotime('+1 week'));
-        }
 
         // Supplementary feature: Webinars.
         // Only show if the admin did not disable this feature completely.
@@ -534,10 +484,7 @@ class mod_zoom_mod_form extends moodleform_mod {
         $mform->addElement('select', 'registration', get_string('registration', 'mod_zoom'), $registrationoptions);
         $mform->setDefault('registration', $config->defaultregistration);
         $mform->addHelpButton('registration', 'registration', 'mod_zoom');
-        if (!$pooled) {
-            // The recurrence_type element does not exist in pooled mode.
-            $mform->hideIf('registration', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_NOTIME);
-        }
+        $mform->hideIf('registration', 'recurrence_type', 'eq', ZOOM_RECURRINGTYPE_NOTIME);
 
         // Adding the "breakout rooms" fieldset.
         if ($config->preassignbreakoutrooms) {
@@ -1206,9 +1153,8 @@ class mod_zoom_mod_form extends moodleform_mod {
             }
         }
 
-        // Only check for scheduled meetings. (Pooled occurrence-first forms
-        // post no schedule fields at all for existing meetings — guard.)
-        if (empty($data['recurring']) && isset($data['start_time'], $data['duration'])) {
+        // Only check for scheduled meetings.
+        if (empty($data['recurring'])) {
             // Make sure start date is in the future.
             if ($data['start_time'] < time() && $data['meeting_id'] < 0) {
                 $errors['start_time'] = get_string('err_start_time_past', 'zoom');
@@ -1226,7 +1172,7 @@ class mod_zoom_mod_form extends moodleform_mod {
             } else if ($data['duration'] > 150 * 60 * 60) {
                 $errors['duration'] = get_string('err_duration_too_long', 'zoom');
             }
-        } else if (!empty($data['recurring']) && ($data['recurrence_type'] ?? null) != ZOOM_RECURRINGTYPE_NOTIME) {
+        } else if ($data['recurring'] == 1 && $data['recurrence_type'] != ZOOM_RECURRINGTYPE_NOTIME) {
             // Make sure start date time (first potential date of next meeting) is in the future.
             if ($data['start_time'] < time() && $data['meeting_id'] < 0) {
                 $errors['start_time'] = get_string('err_start_time_past_recurring', 'zoom');
@@ -1237,44 +1183,6 @@ class mod_zoom_mod_form extends moodleform_mod {
                 $errors['duration'] = get_string('err_duration_nonpositive', 'zoom');
             } else if ($data['duration'] > 150 * 60 * 60) {
                 $errors['duration'] = get_string('err_duration_too_long', 'zoom');
-            }
-        }
-
-        // Pooled-hosts feature (occurrence-first scheduling): validate the
-        // whole plan — extra dates in the future and unique, and (for a new
-        // meeting) a pool host free for EVERY planned slot, so placement is
-        // batch-shaped and a later "wrong host" discovery cannot happen.
-        if (zoom_pooled_group() !== null && empty($data['webinar']) && isset($data['start_time'])) {
-            $planduration = (int) ($data['duration'] ?? 0) ?: HOURSECS;
-            $seen = [(int) $data['start_time'] => true];
-            foreach ((array) ($data['plandates'] ?? []) as $i => $date) {
-                if ((int) $date <= 0) {
-                    continue;
-                }
-
-                if ((int) $date < time()) {
-                    $errors["plandates[$i]"] = get_string('err_start_time_past', 'zoom');
-                } else if (isset($seen[(int) $date])) {
-                    $errors["plandates[$i]"] = get_string('err_plandate_duplicate', 'mod_zoom');
-                }
-
-                $seen[(int) $date] = true;
-            }
-
-            if (empty($errors) && ($data['meeting_id'] ?? -1) < 0) {
-                $plan = zoom_pooled_collect_plan((object) $data);
-                $slots = array_map(function ($date) use ($planduration) {
-                    return [$date, $planduration];
-                }, $plan);
-                try {
-                    zoom_pooled_pick_host((object) [
-                        'meeting_id' => -1,
-                        'registration' => $data['registration'] ?? null,
-                        'teacherid' => $data['teacherid'] ?? null,
-                    ], $slots, $this->context);
-                } catch (moodle_exception $e) {
-                    $errors['start_time'] = get_string('err_plan_no_host', 'mod_zoom');
-                }
             }
         }
 

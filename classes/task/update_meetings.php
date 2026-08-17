@@ -198,54 +198,6 @@ class update_meetings extends scheduled_task {
                     zoom_calendar_item_update($newzoom);
                 }
 
-                // Pooled-hosts feature (occurrence-first scheduling): keep
-                // the occurrence store in step with the readback, and
-                // retroactively conflict-check FUTURE occurrences. Moodle-
-                // side scheduling is checked at action time; Zoom-side
-                // (portal) edits are checked by nobody — Zoom itself never
-                // conflict-checks — so this sync is their detector: a
-                // portal-made double-booking surfaces as occurrence_conflict
-                // (routable to ops) instead of on session day.
-                if (zoom_pooled_group() !== null && empty($zoom->webinar) && !empty($newzoom->recurring)) {
-                    zoom_pooled_sync_occurrences($zoom->id, $newzoom->occurrences ?? []);
-
-                    $now = time();
-                    $futureslots = [];
-                    foreach ($newzoom->occurrences ?? [] as $occurrence) {
-                        if (($occurrence->status ?? '') === 'deleted' || (int) $occurrence->start_time <= $now) {
-                            continue;
-                        }
-
-                        $futureslots[] = [(int) $occurrence->start_time, (int) $occurrence->duration ?: HOURSECS];
-                    }
-
-                    if (!empty($futureslots) && zoom_pooled_slots_conflict($newzoom->host_id, $futureslots, $newzoom->meeting_id)) {
-                        // Pinpoint the first colliding occurrence for the
-                        // payload (extra listings, but only on the rare
-                        // conflict path).
-                        $collidingstart = $futureslots[0][0];
-                        foreach ($futureslots as $slot) {
-                            if (zoom_pooled_slots_conflict($newzoom->host_id, [$slot], $newzoom->meeting_id)) {
-                                $collidingstart = $slot[0];
-                                break;
-                            }
-                        }
-
-                        mtrace('  !! Occurrence conflict on host ' . $newzoom->host_id . ' at ' . userdate($collidingstart));
-                        $cm = get_coursemodule_from_instance('zoom', $zoom->id, $zoom->course);
-                        \mod_zoom\event\occurrence_conflict::create([
-                            'context' => $cm ? \context_module::instance($cm->id) : \context_system::instance(),
-                            'other' => [
-                                'meetingid' => (int) $zoom->meeting_id,
-                                'hostid' => $newzoom->host_id,
-                                'start' => $collidingstart,
-                                'cmid' => $cm ? (int) $cm->id : 0,
-                                'courseid' => (int) $zoom->course,
-                            ],
-                        ])->trigger();
-                    }
-                }
-
                 // Update tracking fields for meeting.
                 mtrace('  => Updated tracking fields for Zoom meeting ID ' . $zoom->meeting_id);
                 zoom_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);

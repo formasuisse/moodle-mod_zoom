@@ -1073,27 +1073,5 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026081402, 'zoom');
     }
 
-    if ($oldversion < 2026081600) {
-        // Pooled-hosts feature: persisted occurrence list (occurrence-first
-        // scheduling), refreshed from every Zoom readback.
-        $table = new xmldb_table('zoom_occurrences');
-        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
-        $table->add_field('zoomid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('occurrenceid', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('starttime', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, null);
-        $table->add_field('duration', XMLDB_TYPE_INTEGER, '6', null, null, null, null);
-        $table->add_field('status', XMLDB_TYPE_CHAR, '20', null, XMLDB_NOTNULL, null, 'available');
-        $table->add_field('timemodified', XMLDB_TYPE_INTEGER, '12', null, null, null, null);
-        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
-        $table->add_key('zoomid_foreign', XMLDB_KEY_FOREIGN, ['zoomid'], 'zoom', ['id']);
-        $table->add_index('zoomid_occurrenceid_idx', XMLDB_INDEX_UNIQUE, ['zoomid', 'occurrenceid']);
-        if (!$dbman->table_exists($table)) {
-            $dbman->create_table($table);
-        }
-
-        // Zoom savepoint reached.
-        upgrade_mod_savepoint(true, 2026081600, 'zoom');
-    }
-
     return true;
 }

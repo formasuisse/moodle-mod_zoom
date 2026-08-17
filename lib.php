@@ -85,9 +85,8 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
         $zoom->password = '';
     }
 
-    // Handle weekdays if weekly recurring meeting selected. (Pooled
-    // occurrence-first forms post no recurrence fields at all — guard.)
-    if (!empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_WEEKLY) {
+    // Handle weekdays if weekly recurring meeting selected.
+    if ($zoom->recurring && $zoom->recurrence_type == ZOOM_RECURRINGTYPE_WEEKLY) {
         $zoom->weekly_days = zoom_handle_weekly_days($zoom);
     }
 
@@ -102,45 +101,10 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
     // Pooled-hosts feature (see README.md, 'Pooled hosts mode'): the
     // host is picked from the pool by slot availability, not derived from the
     // creator's Zoom identity. Fails loudly when no pool host is free.
-    // Occurrence-first scheduling: the form supplies the planned session
-    // dates; the host must fit the WHOLE plan (batch placement — a later
-    // host change would mean a new meeting id and join link). The meeting is
-    // created as a recurring series on a scaffold rule (weekly from the
-    // first session, one grid slot per planned date — a container format,
-    // never user-visible), then each occurrence is moved onto its date.
-    $pooled = zoom_pooled_group() !== null;
-    $occurrencefirst = $pooled && empty($zoom->webinar) && !empty($zoom->start_time);
-    $plandates = [];
-    $planduration = 0;
-    if ($pooled) {
+    if (zoom_pooled_group() !== null) {
         $pooledcontext = !empty($zoom->coursemodule) ? context_module::instance($zoom->coursemodule) : null;
+        $zoom->host_id = zoom_pooled_pick_host($zoom, $pooledcontext);
         unset($zoom->schedule_for);
-        if ($occurrencefirst) {
-            $plandates = zoom_pooled_collect_plan($zoom);
-            $planduration = (int) ($zoom->duration ?? 0) ?: HOURSECS;
-            $slots = array_map(function ($date) use ($planduration) {
-                return [$date, $planduration];
-            }, $plandates);
-            $zoom->host_id = zoom_pooled_pick_host($zoom, $slots, $pooledcontext);
-
-            $firstday = (int) (new DateTimeImmutable(
-                '@' . $plandates[0]
-            ))->setTimezone(new DateTimeZone(!empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get()))
-                ->format('w') + 1;
-            $zoom->start_time = $plandates[0];
-            $zoom->duration = $planduration;
-            $zoom->recurring = 1;
-            $zoom->recurrence_type = ZOOM_RECURRINGTYPE_WEEKLY;
-            $zoom->repeat_interval = 1;
-            $zoom->weekly_days = (string) $firstday;
-            $zoom->end_date_option = ZOOM_END_DATE_OPTION_AFTER;
-            $zoom->end_times = count($plandates);
-        } else {
-            // Webinars keep the legacy single-slot pick.
-            $slots = !empty($zoom->start_time)
-                ? [[(int) $zoom->start_time, (int) ($zoom->duration ?? 0) ?: HOURSECS]] : [];
-            $zoom->host_id = zoom_pooled_pick_host($zoom, $slots, $pooledcontext);
-        }
     }
 
     $response = zoom_webservice()->create_meeting($zoom, $zoom->coursemodule);
@@ -173,13 +137,6 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
 
     // Store tracking field data for meeting.
     zoom_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
-
-    // Pooled-hosts feature (occurrence-first scheduling): move the scaffold
-    // grid onto the planned dates and persist the occurrence store; the
-    // helper re-reads from Zoom and rewrites record + store + calendar.
-    if ($occurrencefirst && !empty($response->occurrences)) {
-        $zoom = zoom_pooled_apply_plan($zoom, $response->occurrences, $plandates, $planduration);
-    }
 
     zoom_calendar_item_update($zoom);
     zoom_grade_item_update($zoom);
@@ -218,9 +175,8 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
         $zoom->password = '';
     }
 
-    // Handle weekdays if weekly recurring meeting selected. (Pooled
-    // occurrence-first forms post no recurrence fields at all — guard.)
-    if (!empty($zoom->recurring) && ($zoom->recurrence_type ?? null) == ZOOM_RECURRINGTYPE_WEEKLY) {
+    // Handle weekdays if weekly recurring meeting selected.
+    if ($zoom->recurring && $zoom->recurrence_type == ZOOM_RECURRINGTYPE_WEEKLY) {
         $zoom->weekly_days = zoom_handle_weekly_days($zoom);
     }
 
@@ -237,21 +193,15 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
     $zoom->meeting_id = $updatedzoomrecord->meeting_id;
     $zoom->webinar = $updatedzoomrecord->webinar;
 
-    // Pooled-hosts feature (occurrence-first scheduling): the settings form
-    // of a pooled meeting carries no schedule fields — the occurrence table
-    // owns the schedule. Merge the stored schedule into the PATCH payload;
-    // re-sending the unchanged rule is measured-safe (2026-08-16: it
-    // preserves every occurrence-level edit). No slot revalidation needed —
-    // the schedule cannot change here by construction.
+    // Pooled-hosts feature: revalidate the (kept) pool host's slot on
+    // reschedule — Zoom accepts overlapping schedules, this is the only guard.
     if (zoom_pooled_group() !== null) {
         unset($zoom->schedule_for);
-        $schedulefields = ['start_time', 'duration', 'recurring', 'recurrence_type', 'repeat_interval',
-            'weekly_days', 'monthly_day', 'monthly_week', 'monthly_week_day', 'monthly_repeat_option',
-            'end_times', 'end_date_time', 'end_date_option'];
-        foreach ($schedulefields as $field) {
-            if (!isset($zoom->$field) && isset($updatedzoomrecord->$field)) {
-                $zoom->$field = $updatedzoomrecord->$field;
-            }
+        if (
+            !empty($zoom->start_time)
+            && zoom_pooled_slot_conflicts($zoom->host_id, $zoom->start_time, $zoom->duration ?? HOURSECS, $zoom->meeting_id)
+        ) {
+            throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
         }
     }
 
@@ -277,11 +227,6 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
     $response = zoom_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
     $zoom = populate_zoom_from_response($zoom, $response);
     $DB->update_record('zoom', $zoom);
-
-    // Pooled-hosts feature: keep the occurrence store in step with the readback.
-    if (zoom_pooled_group() !== null && !empty($zoom->recurring)) {
-        zoom_pooled_sync_occurrences($zoom->id, $zoom->occurrences ?? []);
-    }
 
     // Update tracking field data for meeting.
     zoom_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
@@ -469,9 +414,6 @@ function zoom_delete_instance($id) {
 
     // Delete tracking field data for deleted meetings.
     $DB->delete_records('zoom_meeting_tracking_fields', ['meeting_id' => $zoom->id]);
-
-    // Pooled-hosts feature: drop the persisted occurrence list.
-    $DB->delete_records('zoom_occurrences', ['zoomid' => $zoom->id]);
 
     // Delete any dependent records here.
     zoom_calendar_item_delete($zoom);
