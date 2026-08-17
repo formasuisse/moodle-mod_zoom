@@ -1573,7 +1573,10 @@ function zoom_pooled_occurrence_slots($zoom, array $occurrences) {
  * Pooled-hosts feature (occurrence-first scheduling): the store is a cache
  * of Zoom's authoritative occurrence list, refreshed immediately after every
  * occurrence action and daily by the update_meetings task (which also picks
- * up out-of-band portal edits). Rows absent from the list are removed.
+ * up out-of-band portal edits). FUTURE rows absent from the list are
+ * removed; past rows are kept forever — Zoom ages ended occurrences out of
+ * the readback, and the sessions table (and its recordings) needs the
+ * history.
  *
  * @param int $zoomid zoom table id.
  * @param array $occurrences Zoom occurrence objects (raw or normalised).
@@ -1623,9 +1626,19 @@ function zoom_pooled_sync_occurrences($zoomid, array $occurrences) {
     }
 
     foreach ($existing as $occurrenceid => $row) {
-        if (!isset($seen[$occurrenceid])) {
-            $DB->delete_records('zoom_occurrences', ['id' => $row->id]);
+        if (isset($seen[$occurrenceid])) {
+            continue;
         }
+
+        // Past rows are history — Zoom ages ended occurrences out of the
+        // meeting readback, but the table still needs them (dates, and the
+        // recordings that hang off them). Only future rows absent from the
+        // readback are really gone (e.g. the grid was regenerated).
+        if ((int) $row->starttime < time()) {
+            continue;
+        }
+
+        $DB->delete_records('zoom_occurrences', ['id' => $row->id]);
     }
 }
 

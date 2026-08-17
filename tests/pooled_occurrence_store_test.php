@@ -68,26 +68,33 @@ final class pooled_occurrence_store_test extends advanced_testcase {
     public function test_sync_inserts_updates_and_removes(): void {
         global $DB;
 
+        // Future-relative dates: removal only applies to future rows, so
+        // fixed dates would turn this test into a time bomb.
+        $d1 = gmdate('Y-m-d\TH:i:s\Z', time() + 30 * DAYSECS);
+        $d1moved = gmdate('Y-m-d\TH:i:s\Z', time() + 31 * DAYSECS);
+        $d2 = gmdate('Y-m-d\TH:i:s\Z', time() + 37 * DAYSECS);
+        $d3 = gmdate('Y-m-d\TH:i:s\Z', time() + 44 * DAYSECS);
+
         $zoomid = 4242;
         zoom_pooled_sync_occurrences($zoomid, [
-            $this->rawocc('1000000000000', '2027-06-07T07:00:00Z'),
-            $this->rawocc('2000000000000', '2027-06-14T07:00:00Z'),
+            $this->rawocc('1000000000000', $d1),
+            $this->rawocc('2000000000000', $d2),
         ]);
         $this->assertSame(2, $DB->count_records('zoom_occurrences', ['zoomid' => $zoomid]));
         $row = $DB->get_record('zoom_occurrences', ['zoomid' => $zoomid, 'occurrenceid' => '1000000000000']);
-        $this->assertSame(strtotime('2027-06-07T07:00:00Z'), (int) $row->starttime);
+        $this->assertSame(strtotime($d1), (int) $row->starttime);
         $this->assertSame(3600, (int) $row->duration);
         $this->assertSame('available', $row->status);
 
         // Move one, tombstone the other, add a third — one sync call.
         zoom_pooled_sync_occurrences($zoomid, [
-            $this->rawocc('1000000000000', '2027-06-08T07:00:00Z'),
-            $this->rawocc('2000000000000', '2027-06-14T07:00:00Z', 60, 'deleted'),
-            $this->rawocc('3000000000000', '2027-06-21T07:00:00Z', 90),
+            $this->rawocc('1000000000000', $d1moved),
+            $this->rawocc('2000000000000', $d2, 60, 'deleted'),
+            $this->rawocc('3000000000000', $d3, 90),
         ]);
         $this->assertSame(3, $DB->count_records('zoom_occurrences', ['zoomid' => $zoomid]));
         $this->assertSame(
-            strtotime('2027-06-08T07:00:00Z'),
+            strtotime($d1moved),
             (int) $DB->get_field('zoom_occurrences', 'starttime', ['zoomid' => $zoomid, 'occurrenceid' => '1000000000000'])
         );
         $this->assertSame(
@@ -99,13 +106,45 @@ final class pooled_occurrence_store_test extends advanced_testcase {
             (int) $DB->get_field('zoom_occurrences', 'duration', ['zoomid' => $zoomid, 'occurrenceid' => '3000000000000'])
         );
 
-        // Rows absent from the list are removed.
+        // FUTURE rows absent from the list are removed.
         zoom_pooled_sync_occurrences($zoomid, [
-            $this->rawocc('3000000000000', '2027-06-21T07:00:00Z', 90),
+            $this->rawocc('3000000000000', $d3, 90),
         ]);
         $this->assertSame(
             ['3000000000000'],
             array_keys($DB->get_records('zoom_occurrences', ['zoomid' => $zoomid], '', 'occurrenceid'))
+        );
+    }
+
+    public function test_sync_keeps_past_rows_absent_from_readback(): void {
+        global $DB;
+
+        // Zoom ages ended occurrences out of the meeting readback; the
+        // history (and its recordings) must survive the daily sync.
+        $zoomid = 77;
+        $past = gmdate('Y-m-d\TH:i:s\Z', time() - 10 * DAYSECS);
+        $future = gmdate('Y-m-d\TH:i:s\Z', time() + 10 * DAYSECS);
+        zoom_pooled_sync_occurrences($zoomid, [
+            $this->rawocc('111', $past),
+            $this->rawocc('222', $future),
+        ]);
+
+        // Next sync: Zoom no longer returns the past occurrence.
+        zoom_pooled_sync_occurrences($zoomid, [
+            $this->rawocc('222', $future),
+        ]);
+        $this->assertSame(
+            ['111', '222'],
+            array_keys($DB->get_records('zoom_occurrences', ['zoomid' => $zoomid], 'occurrenceid ASC', 'occurrenceid'))
+        );
+
+        // A FUTURE row absent from the readback is still removed.
+        zoom_pooled_sync_occurrences($zoomid, [
+            $this->rawocc('333', $future),
+        ]);
+        $this->assertSame(
+            ['111', '333'],
+            array_keys($DB->get_records('zoom_occurrences', ['zoomid' => $zoomid], 'occurrenceid ASC', 'occurrenceid'))
         );
     }
 
