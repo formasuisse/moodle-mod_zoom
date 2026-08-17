@@ -984,6 +984,17 @@ class webservice {
         // Granular: webinar:update:webinar:admin.
         $url = ($zoom->webinar ? 'webinars/' : 'meetings/') . $zoom->meeting_id;
         $data = $this->database_to_api($zoom, $cmid);
+
+        // Pooled occurrence-first: the settings form owns NO schedule — the
+        // occurrences table does. Strip every grid-touching key from the
+        // PATCH: re-sending a rule that drifted from Zoom's (Moodle's stored
+        // start_time follows the readback, i.e. the possibly-MOVED first
+        // occurrence) makes Zoom regenerate the whole grid and silently
+        // discard all moves and cancellations (measured 2026-08-16/17).
+        if (zoom_pooled_group() !== null && !empty($zoom->recurring) && empty($zoom->webinar)) {
+            unset($data['start_time'], $data['timezone'], $data['duration'], $data['recurrence'], $data['type']);
+        }
+
         $this->make_call($url, $data, 'patch');
         $this->verify_readback($zoom, $data, $zoom->meeting_id);
     }
@@ -1108,30 +1119,56 @@ class webservice {
      * Pooled-hosts feature (occurrence-first scheduling): Zoom has no
      * add-occurrence API, so adding = end_times+1 (this call — appends one
      * occurrence at the scaffold grid's tail) followed by a
-     * patch_meeting_occurrence() onto the target date. The PATCH body
-     * mirrors the measured-safe shape (start_time + timezone + duration +
-     * unchanged rule): grid-compatible, preserves every occurrence edit.
+     * patch_meeting_occurrence() onto the target date.
+     *
+     * The rule is re-sent VERBATIM from a fresh readback of the meeting,
+     * bumping only end_times: a grid-compatible PATCH preserves every
+     * occurrence edit, but any drift in what we send (different start time,
+     * weekday, ...) makes Zoom REGENERATE the whole grid and silently
+     * discard all moves and cancellations (measured 2026-08-16; bitten
+     * 2026-08-17 — Moodle's stored start_time follows the readback, so
+     * after the FIRST occurrence is moved it no longer matches the grid
+     * anchor and must never be used to rebuild the rule).
      * NB end_times above 60 silently collapses the series to a single
      * occurrence — callers must enforce the cap.
      *
-     * @param stdClass $zoom zoom record (meeting_id, schedule fields).
-     * @param int $endtimes New total occurrence count (including tombstones).
+     * @param stdClass $zoom zoom record (meeting_id, webinar).
      * @return void
+     * @throws moodle_exception zoomerr_occurrence_limit at the 60 cap or
+     *         when the meeting carries no extendable recurrence rule.
      */
-    public function extend_meeting_series($zoom, $endtimes) {
+    public function extend_meeting_series($zoom) {
         // Classic: meeting:write:admin.
         // Granular: meeting:update:meeting:admin.
-        [$localstart, $timezone] = zoom_pooled_local_start((int) $zoom->start_time);
+        $info = $this->get_meeting_webinar_info($zoom->meeting_id, !empty($zoom->webinar));
+        if (empty($info->recurrence)) {
+            throw new moodle_exception('zoomerr_occurrence_limit', 'mod_zoom');
+        }
+
+        $recurrence = (array) $info->recurrence;
+        if (isset($recurrence['end_times'])) {
+            // Zoom honors end_times up to 60; above that a PATCH silently
+            // collapses the series to a SINGLE occurrence (measured).
+            if ((int) $recurrence['end_times'] >= 60) {
+                throw new moodle_exception('zoomerr_occurrence_limit', 'mod_zoom');
+            }
+
+            $recurrence['end_times'] = (int) $recurrence['end_times'] + 1;
+        } else if (!empty($recurrence['end_date_time'])) {
+            // Legacy end-by-date rule (rule-built series): push the end date
+            // out far enough for exactly one more grid slot.
+            $stepdays = (int) ($recurrence['repeat_interval'] ?? 1);
+            $stepdays *= ((int) ($recurrence['type'] ?? 1) === 1) ? 1 : (((int) $recurrence['type'] === 2) ? 7 : 31);
+            $recurrence['end_date_time'] = gmdate(
+                'Y-m-d\TH:i:s\Z',
+                strtotime($recurrence['end_date_time']) + $stepdays * DAYSECS
+            );
+        } else {
+            throw new moodle_exception('zoomerr_occurrence_limit', 'mod_zoom');
+        }
+
         $this->make_call('meetings/' . $zoom->meeting_id, [
-            'start_time' => $localstart,
-            'timezone' => $timezone,
-            'duration' => (int) ceil(((int) $zoom->duration ?: HOURSECS) / 60),
-            'recurrence' => [
-                'type' => (int) $zoom->recurrence_type,
-                'repeat_interval' => (int) ($zoom->repeat_interval ?: 1),
-                'weekly_days' => (string) $zoom->weekly_days,
-                'end_times' => (int) $endtimes,
-            ],
+            'recurrence' => $recurrence,
         ], 'patch');
     }
 

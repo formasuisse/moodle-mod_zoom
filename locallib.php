@@ -2102,21 +2102,15 @@ function zoom_pooled_local_start($epoch) {
 function zoom_pooled_occurrence_add($zoom, $start, $duration) {
     global $DB;
 
-    // Zoom honors end_times up to 60; above that a PATCH silently collapses
-    // the series to a single occurrence (measured 2026-08-16) — hard stop.
-    $endtimes = (int) ($zoom->end_times ?? 1);
-    if ($endtimes >= 60) {
-        throw new moodle_exception('zoomerr_occurrence_limit', 'mod_zoom');
-    }
-
     if (zoom_pooled_slots_conflict($zoom->host_id, [[$start, $duration]], $zoom->meeting_id)) {
         throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
     }
 
     $known = $DB->get_records('zoom_occurrences', ['zoomid' => $zoom->id], '', 'occurrenceid');
-    zoom_webservice()->extend_meeting_series($zoom, $endtimes + 1);
-    $zoom->end_times = $endtimes + 1;
-    $DB->set_field('zoom', 'end_times', $zoom->end_times, ['id' => $zoom->id]);
+    // The extend re-sends Zoom's OWN rule verbatim (readback-based, cap
+    // enforced there): anything else risks a grid regeneration that wipes
+    // every move and cancellation.
+    zoom_webservice()->extend_meeting_series($zoom);
 
     // Find the appended occurrence (the one the store has never seen).
     $response = zoom_webservice()->get_meeting_webinar_info($zoom->meeting_id, $zoom->webinar);
@@ -2132,7 +2126,11 @@ function zoom_pooled_occurrence_add($zoom, $start, $duration) {
         zoom_webservice()->patch_meeting_occurrence($zoom, $appended->occurrence_id, $start, $duration);
     }
 
-    zoom_pooled_refresh_from_zoom($zoom);
+    $zoom = zoom_pooled_refresh_from_zoom($zoom);
+    // Keep the stored rule counter in step (informational only — every rule
+    // write derives from the Zoom readback, never from this field). Zoom's
+    // end_times counts tombstones, i.e. every store row.
+    $DB->set_field('zoom', 'end_times', $DB->count_records('zoom_occurrences', ['zoomid' => $zoom->id]), ['id' => $zoom->id]);
 }
 
 /**
