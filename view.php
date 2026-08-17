@@ -254,7 +254,21 @@ if (!$showrecreate) {
     echo $OUTPUT->box_end();
 }
 
-if ($zoom->show_schedule) {
+// Pooled-hosts feature (occurrence-first scheduling): the occurrence table
+// is the schedule surface — one row per session, inline video recordings,
+// manager add/move/cancel. When it renders, the Schedule box is redundant
+// and suppressed.
+$occurrencetable = '';
+// Default ON while the setting is still unset (settings defaults only land
+// when the admin upgrade step runs — see the #835 deploy-skip history).
+$occurrencetableenabled = get_config('zoom', 'occurrencetable');
+if (zoom_pooled_group() !== null && empty($zoom->webinar)
+        && ($occurrencetableenabled === false || $occurrencetableenabled)) {
+    $occurrencetable = zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager);
+    echo $occurrencetable;
+}
+
+if ($zoom->show_schedule && $occurrencetable === '') {
     echo $OUTPUT->box_start('', 'zoom_section-schedule');
     // Output "Schedule" heading.
     echo $OUTPUT->heading(get_string('schedule', 'mod_zoom'), 3);
