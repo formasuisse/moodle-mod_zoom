@@ -2057,6 +2057,15 @@ function zoom_pooled_planner_html($rows = 30) {
             'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
         ]);
         $html .= html_writer::span(' min ', 'mr-1');
+        foreach (['daily' => 'occ_planner_daily', 'weekly' => 'occ_planner_weekly',
+                'monthly' => 'occ_planner_monthly'] as $kind => $string) {
+            $html .= html_writer::tag('button', get_string($string, 'mod_zoom'), [
+                'type' => 'button', 'data-zoom-occ-spread' => $kind,
+                'class' => 'btn btn-link btn-sm d-none px-1',
+                'title' => get_string('occ_planner_spread', 'mod_zoom'),
+            ]);
+        }
+
         $html .= html_writer::tag('button', '✕', [
             'type' => 'button', 'data-zoom-occ-clearrow' => 1,
             'class' => 'btn btn-link btn-sm d-none px-1',
@@ -2067,9 +2076,6 @@ function zoom_pooled_planner_html($rows = 30) {
 
     $buttons = [
         ['data-zoom-occ-addrow' => 1, 'label' => get_string('occ_planner_addrow', 'mod_zoom')],
-        ['data-zoom-occ-bulk' => 'daily', 'label' => get_string('occ_planner_daily', 'mod_zoom')],
-        ['data-zoom-occ-bulk' => 'weekly', 'label' => get_string('occ_planner_weekly', 'mod_zoom')],
-        ['data-zoom-occ-bulk' => 'monthly', 'label' => get_string('occ_planner_monthly', 'mod_zoom')],
     ];
     $html .= html_writer::start_div('mt-1 zoom-occ-planner-buttons d-none');
     foreach ($buttons as $button) {

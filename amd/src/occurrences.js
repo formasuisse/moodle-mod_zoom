@@ -129,6 +129,9 @@ define([], function() {
                         if (clear) {
                             clear.classList.toggle('d-none', !(i < filled.length && filled.length > 1));
                         }
+                        row.querySelectorAll('[data-zoom-occ-spread]').forEach(function(button) {
+                            button.classList.toggle('d-none', !(i < filled.length));
+                        });
                     });
                 };
                 rows.forEach(function(row) {
@@ -169,40 +172,41 @@ define([], function() {
                         }
                     });
                 }
-                planner.querySelectorAll('[data-zoom-occ-bulk]').forEach(function(button) {
-                    button.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        var base = lastFilled();
-                        if (!base) {
-                            return;
-                        }
-                        var kind = button.getAttribute('data-zoom-occ-bulk');
-                        var baseValues = rowValues(base);
-                        var baseDate = new Date(baseValues.date + 'T12:00:00');
-                        var added = 0;
-                        var pad = function(n) {
-                            return (n < 10 ? '0' : '') + n;
-                        };
-                        for (var i = 0; i < rows.length && added < 5; i++) {
-                            if (fieldOf(rows[i], 'date').value) {
-                                continue;
+                rows.forEach(function(row) {
+                    row.querySelectorAll('[data-zoom-occ-spread]').forEach(function(button) {
+                        button.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            var baseValues = rowValues(row);
+                            if (!baseValues.date) {
+                                return;
                             }
-                            added++;
-                            var d = new Date(baseDate.getTime());
-                            if (kind === 'daily') {
-                                d.setDate(d.getDate() + added);
-                            } else if (kind === 'weekly') {
-                                d.setDate(d.getDate() + 7 * added);
-                            } else {
-                                d.setMonth(d.getMonth() + added);
+                            var kind = button.getAttribute('data-zoom-occ-spread');
+                            var baseDate = new Date(baseValues.date + 'T12:00:00');
+                            var added = 0;
+                            var pad = function(n) {
+                                return (n < 10 ? '0' : '') + n;
+                            };
+                            for (var i = 0; i < rows.length && added < 5; i++) {
+                                if (fieldOf(rows[i], 'date').value) {
+                                    continue;
+                                }
+                                added++;
+                                var d = new Date(baseDate.getTime());
+                                if (kind === 'daily') {
+                                    d.setDate(d.getDate() + added);
+                                } else if (kind === 'weekly') {
+                                    d.setDate(d.getDate() + 7 * added);
+                                } else {
+                                    d.setMonth(d.getMonth() + added);
+                                }
+                                setRow(rows[i], {
+                                    date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()),
+                                    time: baseValues.time,
+                                    minutes: baseValues.minutes
+                                });
                             }
-                            setRow(rows[i], {
-                                date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()),
-                                time: baseValues.time,
-                                minutes: baseValues.minutes
-                            });
-                        }
-                        compact();
+                            compact();
+                        });
                     });
                 });
                 compact();
