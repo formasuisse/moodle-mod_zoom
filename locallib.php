@@ -1804,7 +1804,9 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         $time = substr($local, 11, 5);
         $datehtml = html_writer::start_div('input-group d-inline-flex w-auto align-middle');
         $datehtml .= html_writer::div(
-            html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', ['data-zoom-occ-weekday' => 1]),
+            html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', [
+                'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
+            ]),
             'input-group-prepend'
         );
         $datehtml .= html_writer::empty_tag('input', [
@@ -1812,6 +1814,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             'value' => substr($local, 0, 10), 'required' => 'required',
             'class' => 'form-control w-auto zoom-occ-date',
         ]);
+        $datehtml .= zoom_pooled_date_companion();
         $datehtml .= html_writer::end_div();
         $timehtml = html_writer::select(
             zoom_pooled_time_options($time),
@@ -2025,6 +2028,38 @@ function zoom_pooled_apply_plan($zoom, array $occurrences, array $slots) {
 }
 
 /**
+ * Companion controls for a native date input: a JJ/MM/AAAA text field and a
+ * calendar button.
+ *
+ * A native date input displays in the BROWSER's locale — an English-UI
+ * browser shows MM/DD/YYYY whatever Moodle's language is. The
+ * mod_zoom/occurrences module makes the text field the visible control
+ * (deterministic day/month/year everywhere) and shrinks the native input to
+ * an invisible value carrier whose picker opens from the button
+ * (showPicker()). Without JS the native input stays as-is.
+ *
+ * @return string HTML (hidden until the module activates it).
+ */
+function zoom_pooled_date_companion() {
+    $html = html_writer::empty_tag('input', [
+        'type' => 'text', 'size' => 10, 'maxlength' => 10,
+        'placeholder' => get_string('occ_dateformat', 'mod_zoom'),
+        'inputmode' => 'numeric',
+        'aria-label' => get_string('occ_date', 'mod_zoom'),
+        'class' => 'form-control w-auto zoom-occ-datetext d-none',
+    ]);
+    $html .= html_writer::div(
+        html_writer::tag('button', '📅', [
+            'type' => 'button', 'tabindex' => '-1',
+            'aria-label' => get_string('calendar', 'calendar'),
+            'class' => 'btn btn-outline-secondary zoom-occ-datebtn d-none',
+        ]),
+        'input-group-append d-inline-flex'
+    );
+    return $html;
+}
+
+/**
  * The plain-HTML occurrence planner for the create form.
  *
  * Rendered inside a 'static' form element: formslib outputs static HTML
@@ -2063,6 +2098,7 @@ function zoom_pooled_planner_html($rows = 30) {
             'value' => $first ? $defaultdate : '',
             'class' => 'form-control w-auto zoom-occ-date',
         ]);
+        $html .= zoom_pooled_date_companion();
         $html .= html_writer::end_div();
         $html .= html_writer::empty_tag('input', [
             'type' => 'text', 'name' => 'zoomplan_time[]',

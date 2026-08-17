@@ -35,17 +35,77 @@ define([], function() {
             document.querySelectorAll('input.zoom-occ-date').forEach(function(input) {
                 var scope = input.closest('.input-group') || input.parentElement;
                 var span = scope.querySelector('[data-zoom-occ-weekday]');
-                if (!span) {
-                    return;
-                }
-                input.addEventListener('input', function() {
-                    if (!input.value) {
-                        span.textContent = '';
-                        return;
+                var text = scope.querySelector('.zoom-occ-datetext');
+                var btn = scope.querySelector('.zoom-occ-datebtn');
+                var fmt = function(iso) {
+                    if (!iso) {
+                        return '';
                     }
-                    var day = new Date(input.value + 'T12:00:00');
-                    span.textContent = day.toLocaleDateString(lang, {weekday: 'short'});
-                });
+                    var p = iso.split('-');
+                    return p[2] + '/' + p[1] + '/' + p[0];
+                };
+                var refresh = function() {
+                    if (span) {
+                        span.textContent = input.value
+                            ? new Date(input.value + 'T12:00:00').toLocaleDateString(lang, {weekday: 'short'})
+                            : '';
+                    }
+                    if (text) {
+                        text.value = fmt(input.value);
+                        text.classList.remove('is-invalid');
+                    }
+                };
+                input.addEventListener('input', refresh);
+
+                // Deterministic day/month/year display: the text field becomes
+                // the visible control (a native date input renders in the
+                // BROWSER locale — MM/DD/YYYY on an English browser), the
+                // native input shrinks to an invisible value carrier whose
+                // picker opens from the calendar button or the weekday label.
+                if (text && btn) {
+                    input.style.position = 'absolute';
+                    input.style.opacity = '0';
+                    input.style.width = '1px';
+                    input.style.height = '1px';
+                    input.style.padding = '0';
+                    input.style.border = '0';
+                    input.tabIndex = -1;
+                    text.classList.remove('d-none');
+                    btn.classList.remove('d-none');
+                    var openPicker = function(e) {
+                        e.preventDefault();
+                        try {
+                            if (input.showPicker) {
+                                input.showPicker();
+                            } else {
+                                input.click();
+                            }
+                        } catch (err) {
+                            input.click();
+                        }
+                    };
+                    btn.addEventListener('click', openPicker);
+                    if (span) {
+                        span.style.cursor = 'pointer';
+                        span.addEventListener('click', openPicker);
+                    }
+                    text.addEventListener('change', function() {
+                        var raw = text.value.trim();
+                        if (raw === '') {
+                            input.value = '';
+                        } else {
+                            var m = raw.match(/^(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})$/);
+                            if (!m) {
+                                text.classList.add('is-invalid');
+                                return;
+                            }
+                            input.value = m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+                        }
+                        input.dispatchEvent(new Event('input'));
+                        input.dispatchEvent(new Event('change'));
+                    });
+                }
+                refresh();
             });
 
             document.querySelectorAll('form[id^=zoom-occ-move-]').forEach(function(form) {

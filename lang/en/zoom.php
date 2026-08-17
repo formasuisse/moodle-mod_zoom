@@ -231,6 +231,7 @@ $string['occ_cancelled'] = 'Cancelled';
 $string['occ_cancelled_notify'] = 'Occurrence cancelled.';
 $string['occ_date'] = 'Date';
 $string['occ_duration'] = 'Duration';
+$string['occ_dateformat'] = 'DD/MM/YYYY';
 $string['occ_delete'] = 'Delete';
 $string['occ_delete_confirm_btn'] = 'Confirm deletion';
 $string['occ_delete_confirm'] = 'Delete the occurrence of {$a}? It disappears from the list entirely — use this for dates that were never really planned. (To cancel a planned occurrence visibly, use Cancel instead.)';
