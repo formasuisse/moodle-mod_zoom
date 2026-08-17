@@ -1799,10 +1799,14 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     // [date part, time part] — rendered in separate table columns. The
     // weekday rides inside the date field as an input-group prefix (a
     // native date input cannot display it in its own text).
-    $slotinputs = function ($formid, $epoch) {
+    // $hidden: table rows render their inputs pre-hidden (.zoom-occ-edit
+    // d-none) next to a text view — the row's Edit button swaps them in,
+    // one row at a time (mod_zoom/occurrences).
+    $slotinputs = function ($formid, $epoch, $hidden = false) {
         [$local] = zoom_pooled_local_start($epoch);
         $time = substr($local, 11, 5);
-        $datehtml = html_writer::start_div('input-group d-inline-flex w-auto align-middle flex-nowrap');
+        $editclass = $hidden ? ' zoom-occ-edit d-none' : '';
+        $datehtml = html_writer::start_div('input-group d-inline-flex w-auto align-middle flex-nowrap' . $editclass);
         $datehtml .= html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', [
             'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
         ]);
@@ -1818,7 +1822,7 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             'newtime',
             $time,
             false,
-            ['form' => $formid, 'class' => 'custom-select d-inline-block w-auto']
+            ['form' => $formid, 'class' => 'custom-select d-inline-block w-auto' . $editclass]
         );
         return [$datehtml, $timehtml];
     };
@@ -1846,13 +1850,19 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         }
 
         if ($editable) {
+            // Text view + pre-hidden inputs side by side: the row's Edit
+            // button swaps to the inputs, one row at a time — a Save can
+            // then never discard half-done edits on other rows.
             $formid = 'zoom-occ-move-' . $row->occurrenceid;
-            [$datecell, $timecell] = $slotinputs($formid, (int) $row->starttime);
-            $durationcell = html_writer::empty_tag('input', [
-                'type' => 'number', 'name' => 'newduration', 'form' => $formid,
-                'value' => (int) round(($row->duration ?: $zoom->duration) / 60), 'min' => 1, 'max' => 1440,
-                'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
-            ]) . ' min';
+            [$dateinput, $timeinput] = $slotinputs($formid, (int) $row->starttime, true);
+            $datecell = html_writer::span($datetext, 'zoom-occ-view') . $dateinput;
+            $timecell = html_writer::span($timetext, 'zoom-occ-view') . $timeinput;
+            $durationcell = html_writer::span(format_time((int) ($row->duration ?: $zoom->duration)), 'zoom-occ-view')
+                . html_writer::span(html_writer::empty_tag('input', [
+                    'type' => 'number', 'name' => 'newduration', 'form' => $formid,
+                    'value' => (int) round(($row->duration ?: $zoom->duration) / 60), 'min' => 1, 'max' => 1440,
+                    'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
+                ]) . ' min', 'zoom-occ-edit d-none text-nowrap');
         } else {
             $datecell = $datetext;
             $timecell = $timetext;
@@ -1889,11 +1899,10 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
                             'id' => $cm->id, 'action' => 'recshow', 'recording' => $recording->id,
                             'show' => $hidden ? 1 : 0, 'sesskey' => sesskey(),
                         ]);
-                        $link .= ' ' . html_writer::link(
+                        $link .= ' ' . html_writer::span('(' . html_writer::link(
                             $toggleurl,
-                            get_string($hidden ? 'occ_rec_show' : 'occ_rec_hide', 'mod_zoom'),
-                            ['class' => 'small']
-                        );
+                            get_string($hidden ? 'occ_rec_show' : 'occ_rec_hide', 'mod_zoom')
+                        ) . ')', 'small');
                     }
 
                     $links[] = $link;
@@ -1907,16 +1916,22 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             $actions = '';
             if ($editable) {
                 $formid = 'zoom-occ-move-' . $row->occurrenceid;
+                // One row edits at a time: Edit swaps the row's text for the
+                // inputs and locks the other rows' Edit buttons; Save is grey
+                // until the row is dirty, Revert restores and unlocks
+                // (mod_zoom/occurrences).
+                $actions .= html_writer::tag('button', get_string('edit'), [
+                    'type' => 'button', 'data-zoom-occ-editrow' => 1,
+                    'class' => 'btn btn-secondary btn-sm mr-1',
+                ]);
                 $actions .= $formhiddens($formid, 'move', $row->occurrenceid);
-                // Grey while the row matches the stored schedule, primary
-                // when dirty; Revert discards the edit (mod_zoom/occurrences).
                 $actions .= html_writer::empty_tag('input', [
                     'type' => 'submit', 'value' => get_string('savechanges'),
-                    'class' => 'btn btn-secondary btn-sm mr-1',
+                    'class' => 'btn btn-secondary btn-sm mr-1 zoom-occ-edit d-none',
                 ]);
                 $actions .= html_writer::tag('button', get_string('occ_revert', 'mod_zoom'), [
                     'type' => 'button', 'data-zoom-occ-revert' => 1,
-                    'class' => 'btn btn-link btn-sm d-none',
+                    'class' => 'btn btn-link btn-sm zoom-occ-edit d-none',
                 ]);
                 $actions .= html_writer::end_tag('form');
                 $actions .= ' ' . html_writer::link(new moodle_url('/mod/zoom/occurrence.php', [

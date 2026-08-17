@@ -18,9 +18,12 @@
  *
  * - Weekday label next to each editable date input stays in step while the
  *   date is changed ("is this really a Monday?" at a glance).
+ * - One row edits at a time: Edit swaps the row's text for its inputs and
+ *   locks the other rows' Edit buttons, so a Save can never discard
+ *   half-done edits elsewhere. Revert restores the row and unlocks.
  * - Per-row dirty state: Save is grey and disabled while the row matches
  *   the stored schedule, turns primary (blue) when there is something to
- *   save; a Revert button appears alongside to discard the edit.
+ *   save.
  * - The collapsed add-occurrence form can be discarded (close button).
  *
  * @module     mod_zoom/occurrences
@@ -123,18 +126,38 @@ define([], function() {
                 refresh();
             });
 
+            var rowEntries = [];
+            var setRowActive = function(entry, active) {
+                entry.row.querySelectorAll('.zoom-occ-view').forEach(function(el) {
+                    el.classList.toggle('d-none', active);
+                });
+                entry.row.querySelectorAll('.zoom-occ-edit').forEach(function(el) {
+                    el.classList.toggle('d-none', !active);
+                });
+                entry.editBtn.classList.toggle('d-none', active);
+                // The lock: while one row edits, no other row can start.
+                rowEntries.forEach(function(other) {
+                    if (other !== entry) {
+                        other.editBtn.disabled = active;
+                    }
+                });
+            };
             document.querySelectorAll('form[id^=zoom-occ-move-]').forEach(function(form) {
                 var fields = Array.prototype.filter.call(form.elements, function(el) {
                     return ['newdate', 'newtime', 'newduration'].indexOf(el.name) !== -1;
                 });
                 var save = form.querySelector('input[type=submit]');
                 var revert = form.querySelector('[data-zoom-occ-revert]');
-                if (!fields.length || !save) {
+                var row = form.closest('tr');
+                var editBtn = row && row.querySelector('[data-zoom-occ-editrow]');
+                if (!fields.length || !save || !editBtn) {
                     return;
                 }
                 var initial = fields.map(function(el) {
                     return el.value;
                 });
+                var entry = {row: row, editBtn: editBtn};
+                rowEntries.push(entry);
                 var refresh = function() {
                     var dirty = fields.some(function(el, i) {
                         return el.value !== initial[i];
@@ -142,13 +165,13 @@ define([], function() {
                     save.disabled = !dirty;
                     save.classList.toggle('btn-primary', dirty);
                     save.classList.toggle('btn-secondary', !dirty);
-                    if (revert) {
-                        revert.classList.toggle('d-none', !dirty);
-                    }
                 };
                 fields.forEach(function(el) {
                     el.addEventListener('input', refresh);
                     el.addEventListener('change', refresh);
+                });
+                editBtn.addEventListener('click', function() {
+                    setRowActive(entry, true);
                 });
                 if (revert) {
                     revert.addEventListener('click', function(e) {
@@ -158,6 +181,7 @@ define([], function() {
                             el.dispatchEvent(new Event('input'));
                         });
                         refresh();
+                        setRowActive(entry, false);
                     });
                 }
                 refresh();

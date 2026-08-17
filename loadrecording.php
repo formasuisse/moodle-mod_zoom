@@ -41,12 +41,16 @@ $PAGE->set_context($context);
 
 require_capability('mod/zoom:view', $context);
 
-// Only show recording that is visble and valid.
+// Only show recording that is visble and valid. Managers can follow the
+// link of a hidden recording too (the occurrences table lists them for
+// review) — hiding gates students, not the people doing the hiding.
 $params = [
     'id' => $recordingid,
-    'showrecording' => 1,
     'zoomid' => $zoom->id,
 ];
+if (!has_capability('mod/zoom:addinstance', $context)) {
+    $params['showrecording'] = 1;
+}
 $rec = $DB->get_record('zoom_meeting_recordings', $params);
 if (empty($rec)) {
     throw new moodle_exception('recordingnotfound', 'mod_zoom');
