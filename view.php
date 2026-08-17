@@ -264,7 +264,10 @@ $occurrencetable = '';
 $occurrencetableenabled = get_config('zoom', 'occurrencetable');
 if (zoom_pooled_group() !== null && empty($zoom->webinar)
         && ($occurrencetableenabled === false || $occurrencetableenabled)) {
-    $occurrencetable = zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager);
+    // Management UI only in edit mode: outside "Mode d'édition" managers
+    // see exactly the student rendering (plain dates, student-visible
+    // recordings only, no actions).
+    $occurrencetable = zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager && $PAGE->user_is_editing());
     echo $occurrencetable;
 }
 
