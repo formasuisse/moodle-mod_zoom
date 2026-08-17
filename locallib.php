@@ -1967,11 +1967,10 @@ function zoom_pooled_collect_plan($data) {
  *
  * @param stdClass $zoom zoom record (id, meeting_id, webinar set).
  * @param array $occurrences The create response's occurrence list.
- * @param int[] $dates Planned dates (sorted).
- * @param int $duration Session duration (seconds).
+ * @param array $slots Planned [start, duration(seconds)] pairs (sorted).
  * @return stdClass The refreshed record.
  */
-function zoom_pooled_apply_plan($zoom, array $occurrences, array $dates, $duration) {
+function zoom_pooled_apply_plan($zoom, array $occurrences, array $slots) {
     // [start, duration, occurrence_id] per non-deleted occurrence, by start.
     $grid = [];
     foreach ($occurrences as $occurrence) {
@@ -1991,18 +1990,18 @@ function zoom_pooled_apply_plan($zoom, array $occurrences, array $dates, $durati
     usort($grid, function ($a, $b) {
         return $a[0] <=> $b[0];
     });
-    if (count($grid) !== count($dates)) {
+    if (count($grid) !== count($slots)) {
         debugging('mod_zoom pooled: scaffold expanded to ' . count($grid) . ' occurrences for '
-            . count($dates) . ' planned dates', DEBUG_DEVELOPER);
+            . count($slots) . ' planned dates', DEBUG_DEVELOPER);
     }
 
-    foreach ($dates as $i => $date) {
+    foreach ($slots as $i => $slot) {
         if (!isset($grid[$i])) {
             break;
         }
 
-        if ($grid[$i][0] !== $date || $grid[$i][1] !== $duration) {
-            zoom_webservice()->patch_meeting_occurrence($zoom, $grid[$i][2], $date, $duration);
+        if ($grid[$i][0] !== $slot[0] || $grid[$i][1] !== $slot[1]) {
+            zoom_webservice()->patch_meeting_occurrence($zoom, $grid[$i][2], $slot[0], $slot[1]);
         }
     }
 
@@ -2036,12 +2035,9 @@ function zoom_pooled_planner_html($rows = 30) {
         $html .= html_writer::start_div('mb-1 zoom-occ-planner-row' . ($first ? '' : ' d-none'), [
             'data-zoom-occ-row' => $i,
         ]);
-        $html .= html_writer::span(
-            $first ? get_string('firstsession', 'mod_zoom') : get_string('plandate', 'mod_zoom'),
-            'd-inline-block text-muted',
-            ['style' => 'width:11em']
-        );
-        $html .= html_writer::span('', 'zoom-occ-weekday mr-1', ['data-zoom-occ-weekday' => 1]);
+        $html .= html_writer::span('', 'zoom-occ-weekday d-inline-block mr-1', [
+            'data-zoom-occ-weekday' => 1, 'style' => 'width:2.5em',
+        ]);
         $html .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'zoomplan_date[]',
             'value' => $first ? $defaultdate : '',
@@ -2052,7 +2048,19 @@ function zoom_pooled_planner_html($rows = 30) {
             'value' => $first ? $defaulttime : '',
             'size' => 5, 'maxlength' => 5, 'placeholder' => 'HH:MM',
             'pattern' => '([01][0-9]|2[0-3]):[0-5][0-9]',
-            'class' => 'form-control d-inline-block w-auto',
+            'class' => 'form-control d-inline-block w-auto mr-1',
+        ]);
+        $html .= html_writer::empty_tag('input', [
+            'type' => 'number', 'name' => 'zoomplan_minutes[]',
+            'value' => $first ? 60 : '',
+            'min' => 1, 'max' => 1440, 'placeholder' => 'min',
+            'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
+        ]);
+        $html .= html_writer::span(' min ', 'mr-1');
+        $html .= html_writer::tag('button', '✕', [
+            'type' => 'button', 'data-zoom-occ-clearrow' => 1,
+            'class' => 'btn btn-link btn-sm d-none px-1',
+            'aria-label' => get_string('delete'), 'title' => get_string('delete'),
         ]);
         $html .= html_writer::end_div();
     }
@@ -2085,22 +2093,27 @@ function zoom_pooled_planner_html($rows = 30) {
  * empty date are skipped; a filled row that does not parse yields 0 (the
  * caller reports it).
  *
- * @return array [int[] epochs ordered as submitted (0 = unparseable row),
+ * @return array [array rows keyed by input index, each
+ *                ['start' => int epoch (0 = unparseable), 'minutes' => int],
  *                bool whether any row was submitted at all]
  */
 function zoom_pooled_planner_submitted() {
     $dates = optional_param_array('zoomplan_date', [], PARAM_RAW_TRIMMED);
     $times = optional_param_array('zoomplan_time', [], PARAM_RAW_TRIMMED);
-    $epochs = [];
+    $minutes = optional_param_array('zoomplan_minutes', [], PARAM_RAW_TRIMMED);
+    $rows = [];
     foreach ($dates as $i => $date) {
         if (trim($date) === '') {
             continue;
         }
 
-        $epochs[$i] = zoom_pooled_parse_local(trim($date) . ' ' . trim($times[$i] ?? ''));
+        $rows[$i] = [
+            'start' => zoom_pooled_parse_local(trim($date) . ' ' . trim($times[$i] ?? '')),
+            'minutes' => (int) ($minutes[$i] ?? 0),
+        ];
     }
 
-    return [$epochs, !empty($dates)];
+    return [$rows, !empty($dates)];
 }
 
 /**

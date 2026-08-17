@@ -292,19 +292,11 @@ class mod_zoom_mod_form extends moodleform_mod {
             // Start time needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
             // Moved this control to javascript, rather than using disabledIf.
 
-            // Add duration.
-            $mform->addElement('duration', 'duration', get_string('duration', 'zoom'), ['optional' => false]);
-            // Validation in validation(). Default to one hour.
-            $mform->setDefault('duration', ['number' => 1, 'timeunit' => 3600]);
-            // Pooled-hosts feature: the slot picker and the end-of-session task
-            // need a real duration — mark it required in the form (asterisk;
-            // enforced server-side in validation()). Server validation only: a
-            // 'client' rule on a group element makes QuickForm emit JS against
-            // getElementById('id_duration'), which does not exist for groups —
-            // the resulting TypeError kills the whole generated validation
-            // script, disabling client-side validation for the entire form.
-            if ($pooled) {
-                $mform->addRule('duration', get_string('err_duration_nonpositive', 'zoom'), 'required', null, 'server');
+            if (!$pooled) {
+                // Add duration. Validation in validation(). Default to one
+                // hour. (Pooled planner rows carry their own duration.)
+                $mform->addElement('duration', 'duration', get_string('duration', 'zoom'), ['optional' => false]);
+                $mform->setDefault('duration', ['number' => 1, 'timeunit' => 3600]);
             }
             // Duration needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
             // Moved this control to javascript, rather than using disabledIf.
@@ -1039,15 +1031,22 @@ class mod_zoom_mod_form extends moodleform_mod {
         parent::data_postprocessing($data);
 
         // Pooled occurrence-first: the planner posts local wall-clock rows
-        // outside the moodleform data — read them back and hand lib.php the
-        // epochs (site timezone, the same one every Zoom write uses).
+        // outside the moodleform data — read them back, sort by date, and
+        // hand lib.php the epochs with their per-row durations (site
+        // timezone, the same one every Zoom write uses).
         if (zoom_pooled_group() !== null) {
-            [$epochs, $submitted] = zoom_pooled_planner_submitted();
+            [$rows, $submitted] = zoom_pooled_planner_submitted();
             if ($submitted) {
-                $epochs = array_values(array_filter($epochs));
-                sort($epochs);
-                $data->start_time = $epochs[0] ?? 0;
-                $data->plandates = array_slice($epochs, 1);
+                $pairs = array_values(array_filter(array_map(function ($row) {
+                    return $row['start'] > 0 ? [$row['start'], max(1, $row['minutes']) * 60] : null;
+                }, $rows)));
+                usort($pairs, function ($a, $b) {
+                    return $a[0] <=> $b[0];
+                });
+                $data->start_time = $pairs[0][0] ?? 0;
+                $data->duration = $pairs[0][1] ?? HOURSECS;
+                $data->plandates = array_column(array_slice($pairs, 1), 0);
+                $data->plandurations = array_column(array_slice($pairs, 1), 1);
             }
         }
 
@@ -1256,43 +1255,41 @@ class mod_zoom_mod_form extends moodleform_mod {
         // placement is batch-shaped and a later "wrong host" discovery
         // cannot happen.
         if (zoom_pooled_group() !== null && empty($data['webinar'])) {
-            [$epochs, $submitted] = zoom_pooled_planner_submitted();
+            [$rows, $submitted] = zoom_pooled_planner_submitted();
             $isnew = ($data['meeting_id'] ?? -1) < 0;
             if ($submitted && $isnew) {
-                if (($data['duration'] ?? 0) <= 0) {
-                    $errors['duration'] = get_string('err_duration_nonpositive', 'zoom');
-                } else if ($data['duration'] > 150 * 60 * 60) {
-                    $errors['duration'] = get_string('err_duration_too_long', 'zoom');
-                }
-
-                $planduration = (int) ($data['duration'] ?? 0) ?: HOURSECS;
                 $rowerrors = [];
-                if (empty($epochs)) {
+                if (empty($rows)) {
                     $rowerrors[] = get_string('occ_err_baddate', 'mod_zoom');
                 }
 
                 $plan = [];
-                foreach ($epochs as $i => $epoch) {
-                    $row = $i + 1;
-                    if ($epoch <= 0) {
-                        $rowerrors[] = "#$row: " . get_string('occ_err_baddate', 'mod_zoom');
-                    } else if ($epoch < time()) {
-                        $rowerrors[] = "#$row: " . get_string('err_start_time_past', 'zoom');
-                    } else if (isset($plan[$epoch])) {
-                        $rowerrors[] = "#$row: " . get_string('err_plandate_duplicate', 'mod_zoom');
+                $slots = [];
+                $rownum = 0;
+                foreach ($rows as $row) {
+                    $rownum++;
+                    if ($row['start'] <= 0) {
+                        $rowerrors[] = "#$rownum: " . get_string('occ_err_baddate', 'mod_zoom');
+                    } else if ($row['start'] < time()) {
+                        $rowerrors[] = "#$rownum: " . get_string('err_start_time_past', 'zoom');
+                    } else if (isset($plan[$row['start']])) {
+                        $rowerrors[] = "#$rownum: " . get_string('err_plandate_duplicate', 'mod_zoom');
                     }
 
-                    $plan[$epoch] = true;
+                    if ($row['minutes'] < 1 || $row['minutes'] > 1440) {
+                        $rowerrors[] = "#$rownum: " . get_string('err_duration_nonpositive', 'zoom');
+                    }
+
+                    $plan[$row['start']] = true;
+                    $slots[] = [$row['start'], $row['minutes'] * 60];
                 }
 
                 if (!empty($rowerrors)) {
                     $errors['plandatesplanner'] = implode(' ', $rowerrors);
                 } else {
-                    $dates = array_keys($plan);
-                    sort($dates);
-                    $slots = array_map(function ($date) use ($planduration) {
-                        return [$date, $planduration];
-                    }, $dates);
+                    usort($slots, function ($a, $b) {
+                        return $a[0] <=> $b[0];
+                    });
                     try {
                         zoom_pooled_pick_host((object) [
                             'meeting_id' => -1,

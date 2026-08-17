@@ -90,38 +90,67 @@ define([], function() {
             var planner = document.querySelector('[data-zoom-occ-planner]');
             if (planner) {
                 var rows = Array.prototype.slice.call(planner.querySelectorAll('[data-zoom-occ-row]'));
-                var dateOf = function(row) {
-                    return row.querySelector('input[name="zoomplan_date[]"]');
+                var fieldOf = function(row, name) {
+                    return row.querySelector('input[name="zoomplan_' + name + '[]"]');
                 };
-                var timeOf = function(row) {
-                    return row.querySelector('input[name="zoomplan_time[]"]');
+                var rowValues = function(row) {
+                    return {
+                        date: fieldOf(row, 'date').value,
+                        time: fieldOf(row, 'time').value,
+                        minutes: fieldOf(row, 'minutes').value
+                    };
                 };
-                var refreshWeekday = function(row) {
-                    dateOf(row).dispatchEvent(new Event('input'));
+                var setRow = function(row, values) {
+                    fieldOf(row, 'date').value = values ? values.date : '';
+                    fieldOf(row, 'time').value = values ? values.time : '';
+                    fieldOf(row, 'minutes').value = values ? values.minutes : '';
+                    fieldOf(row, 'date').dispatchEvent(new Event('input'));
+                };
+                // Sort filled rows by date+time, compact them to the top,
+                // hide unused rows, and show ✕ when more than one row.
+                var compact = function() {
+                    var filled = [];
+                    rows.forEach(function(row) {
+                        var values = rowValues(row);
+                        if (values.date) {
+                            filled.push(values);
+                        }
+                    });
+                    filled.sort(function(a, b) {
+                        return (a.date + 'T' + a.time) < (b.date + 'T' + b.time) ? -1 : 1;
+                    });
+                    rows.forEach(function(row, i) {
+                        setRow(row, filled[i] || null);
+                        row.classList.toggle('d-none', !(i < filled.length || i === filled.length));
+                        if (i === filled.length) {
+                            row.classList.remove('d-none');
+                        }
+                        var clear = row.querySelector('[data-zoom-occ-clearrow]');
+                        if (clear) {
+                            clear.classList.toggle('d-none', !(i < filled.length && filled.length > 1));
+                        }
+                    });
                 };
                 rows.forEach(function(row) {
-                    if (dateOf(row).value) {
-                        row.classList.remove('d-none');
-                        refreshWeekday(row);
+                    fieldOf(row, 'date').addEventListener('change', compact);
+                    fieldOf(row, 'time').addEventListener('change', compact);
+                    var clear = row.querySelector('[data-zoom-occ-clearrow]');
+                    if (clear) {
+                        clear.addEventListener('click', function(e) {
+                            e.preventDefault();
+                            setRow(row, null);
+                            compact();
+                        });
                     }
                 });
                 var buttons = planner.querySelector('.zoom-occ-planner-buttons');
                 if (buttons) {
                     buttons.classList.remove('d-none');
                 }
-                var nextFree = function() {
-                    for (var i = 0; i < rows.length; i++) {
-                        if (!dateOf(rows[i]).value) {
-                            rows[i].classList.remove('d-none');
-                            return rows[i];
-                        }
-                    }
-                    return null;
-                };
                 var lastFilled = function() {
                     var found = null;
                     rows.forEach(function(row) {
-                        if (dateOf(row).value) {
+                        if (fieldOf(row, 'date').value) {
                             found = row;
                         }
                     });
@@ -131,9 +160,12 @@ define([], function() {
                 if (addrow) {
                     addrow.addEventListener('click', function(e) {
                         e.preventDefault();
-                        var row = nextFree();
-                        if (row) {
-                            dateOf(row).focus();
+                        for (var i = 0; i < rows.length; i++) {
+                            if (!fieldOf(rows[i], 'date').value) {
+                                rows[i].classList.remove('d-none');
+                                fieldOf(rows[i], 'date').focus();
+                                return;
+                            }
                         }
                     });
                 }
@@ -145,30 +177,35 @@ define([], function() {
                             return;
                         }
                         var kind = button.getAttribute('data-zoom-occ-bulk');
-                        var baseDate = new Date(dateOf(base).value + 'T12:00:00');
-                        var baseTime = timeOf(base).value;
-                        for (var i = 1; i <= 5; i++) {
-                            var row = nextFree();
-                            if (!row) {
-                                return;
+                        var baseValues = rowValues(base);
+                        var baseDate = new Date(baseValues.date + 'T12:00:00');
+                        var added = 0;
+                        var pad = function(n) {
+                            return (n < 10 ? '0' : '') + n;
+                        };
+                        for (var i = 0; i < rows.length && added < 5; i++) {
+                            if (fieldOf(rows[i], 'date').value) {
+                                continue;
                             }
+                            added++;
                             var d = new Date(baseDate.getTime());
                             if (kind === 'daily') {
-                                d.setDate(d.getDate() + i);
+                                d.setDate(d.getDate() + added);
                             } else if (kind === 'weekly') {
-                                d.setDate(d.getDate() + 7 * i);
+                                d.setDate(d.getDate() + 7 * added);
                             } else {
-                                d.setMonth(d.getMonth() + i);
+                                d.setMonth(d.getMonth() + added);
                             }
-                            var pad = function(n) {
-                                return (n < 10 ? '0' : '') + n;
-                            };
-                            dateOf(row).value = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-                            timeOf(row).value = baseTime;
-                            refreshWeekday(row);
+                            setRow(rows[i], {
+                                date: d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()),
+                                time: baseValues.time,
+                                minutes: baseValues.minutes
+                            });
                         }
+                        compact();
                     });
                 });
+                compact();
             }
 
             document.querySelectorAll('[data-zoom-occ-close]').forEach(function(button) {

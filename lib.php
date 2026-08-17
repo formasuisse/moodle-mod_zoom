@@ -118,10 +118,17 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
         if ($occurrencefirst) {
             $plandates = zoom_pooled_collect_plan($zoom);
             $planduration = (int) ($zoom->duration ?? 0) ?: HOURSECS;
-            $slots = array_map(function ($date) use ($planduration) {
-                return [$date, $planduration];
+            // Per-row durations (planner) align with plandates; fall back to
+            // the uniform duration for callers that provide none.
+            $durationbydate = [(int) $zoom->start_time => $planduration];
+            foreach ((array) ($zoom->plandates ?? []) as $i => $date) {
+                $durationbydate[(int) $date] = (int) (($zoom->plandurations[$i] ?? 0) ?: $planduration);
+            }
+
+            $planslots = array_map(function ($date) use ($durationbydate, $planduration) {
+                return [$date, $durationbydate[$date] ?? $planduration];
             }, $plandates);
-            $zoom->host_id = zoom_pooled_pick_host($zoom, $slots, $pooledcontext);
+            $zoom->host_id = zoom_pooled_pick_host($zoom, $planslots, $pooledcontext);
 
             $firstday = (int) (new DateTimeImmutable(
                 '@' . $plandates[0]
@@ -178,7 +185,7 @@ function zoom_add_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) {
     // grid onto the planned dates and persist the occurrence store; the
     // helper re-reads from Zoom and rewrites record + store + calendar.
     if ($occurrencefirst && !empty($response->occurrences)) {
-        $zoom = zoom_pooled_apply_plan($zoom, $response->occurrences, $plandates, $planduration);
+        $zoom = zoom_pooled_apply_plan($zoom, $response->occurrences, $planslots);
     }
 
     zoom_calendar_item_update($zoom);
