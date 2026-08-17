@@ -1986,6 +1986,30 @@ function zoom_pooled_apply_plan($zoom, array $occurrences, array $dates, $durati
 }
 
 /**
+ * Parse a datetime-local wall-clock string into an epoch.
+ *
+ * Counterpart of zoom_pooled_local_start(): the site timezone is the one
+ * every Zoom write uses, so form inputs are interpreted in it too.
+ *
+ * @param string $raw e.g. '2026-09-07T09:00'.
+ * @return int Unix timestamp, or 0 when the string cannot be parsed.
+ */
+function zoom_pooled_parse_local($raw) {
+    global $CFG;
+    $raw = trim((string) $raw);
+    if ($raw === '') {
+        return 0;
+    }
+
+    $tzname = !empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get();
+    try {
+        return (new DateTimeImmutable($raw, new DateTimeZone($tzname)))->getTimestamp();
+    } catch (Exception $e) {
+        return 0;
+    }
+}
+
+/**
  * Local wall-clock representation of an epoch for occurrence PATCH bodies.
  *
  * Zoom occurrence updates take a local datetime + timezone; use the same

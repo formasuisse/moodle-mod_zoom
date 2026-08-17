@@ -74,10 +74,8 @@ function mod_zoom_occurrence_slot_params($viewurl) {
 
     // The datetime-local input carries site-local wall clock — the same
     // timezone every Zoom write uses (see zoom_pooled_local_start()).
-    $tzname = !empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get();
-    try {
-        $start = (new DateTimeImmutable($rawdatetime, new DateTimeZone($tzname)))->getTimestamp();
-    } catch (Exception $e) {
+    $start = zoom_pooled_parse_local($rawdatetime);
+    if ($start <= 0) {
         redirect($viewurl, get_string('occ_err_baddate', 'mod_zoom'), null, \core\output\notification::NOTIFY_ERROR);
     }
 

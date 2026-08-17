@@ -263,13 +263,30 @@ class mod_zoom_mod_form extends moodleform_mod {
         }
 
         if (!$pooled || $isnew) {
-            // Add date/time. Validation in validation().
-            $starttimeoptions = [
-                'step' => 5,
-                'defaulttime' => time() + 3600,
-            ];
-            $starttimelabel = $pooled ? get_string('firstsession', 'mod_zoom') : get_string('start_time', 'zoom');
-            $mform->addElement('date_time_selector', 'start_time', $starttimelabel, $starttimeoptions);
+            if ($pooled) {
+                // Occurrence-first: native datetime-local inputs — a real
+                // calendar picker showing weekdays, far easier for planning
+                // specific weekdays than the dropdown date_time_selector.
+                // Posted as local wall-clock strings; converted to epochs in
+                // data_postprocessing() (site timezone, like every Zoom
+                // write).
+                MoodleQuickForm::registerElementType(
+                    'zoomdatetimelocal',
+                    __FILE__,
+                    'mod_zoom_datetimelocal_form_element'
+                );
+                $mform->addElement('zoomdatetimelocal', 'start_time', get_string('firstsession', 'mod_zoom'));
+                $mform->setType('start_time', PARAM_RAW_TRIMMED);
+                $mform->setDefault('start_time', date('Y-m-d\TH:i', time() + 3600));
+                $mform->addRule('start_time', get_string('occ_err_baddate', 'mod_zoom'), 'required', null, 'server');
+            } else {
+                // Add date/time. Validation in validation().
+                $starttimeoptions = [
+                    'step' => 5,
+                    'defaulttime' => time() + 3600,
+                ];
+                $mform->addElement('date_time_selector', 'start_time', get_string('start_time', 'zoom'), $starttimeoptions);
+            }
             // Start time needs to be enabled/disabled based on recurring checkbox as well recurrence_type.
             // Moved this control to javascript, rather than using disabledIf.
 
@@ -301,16 +318,15 @@ class mod_zoom_mod_form extends moodleform_mod {
             $mform->addElement('static', 'plandatesintro', '', get_string('plandatesintro', 'mod_zoom'));
             $repeatarray = [
                 $mform->createElement(
-                    'date_time_selector',
+                    'zoomdatetimelocal',
                     'plandates',
-                    get_string('plandate', 'mod_zoom'),
-                    ['optional' => true, 'step' => 5]
+                    get_string('plandate', 'mod_zoom')
                 ),
             ];
             $this->repeat_elements(
                 $repeatarray,
                 1,
-                [],
+                ['plandates' => ['type' => PARAM_RAW_TRIMMED]],
                 'plandates_repeats',
                 'plandates_add_fields',
                 5,
@@ -1047,6 +1063,21 @@ class mod_zoom_mod_form extends moodleform_mod {
 
         parent::data_postprocessing($data);
 
+        // Pooled occurrence-first: the native datetime-local inputs post
+        // local wall-clock strings — convert to epochs (site timezone, the
+        // same one every Zoom write uses). Unused plan rows post ''.
+        if (zoom_pooled_group() !== null) {
+            if (isset($data->start_time) && is_string($data->start_time)) {
+                $data->start_time = zoom_pooled_parse_local($data->start_time);
+            }
+
+            if (isset($data->plandates)) {
+                $data->plandates = array_map(function ($raw) {
+                    return is_string($raw) ? zoom_pooled_parse_local($raw) : (int) $raw;
+                }, (array) $data->plandates);
+            }
+        }
+
         // Pooled-hosts feature: retention override — empty string means
         // "inherit the site value" and must be stored as NULL, not 0
         // (0 means never purge).
@@ -1210,10 +1241,12 @@ class mod_zoom_mod_form extends moodleform_mod {
         }
 
         // Only check for scheduled meetings. (Pooled occurrence-first forms
-        // post no schedule fields at all for existing meetings — guard.)
+        // post no schedule fields at all for existing meetings — guard; and
+        // their start_time is a datetime-local STRING, validated in the
+        // pooled block below instead.)
         if (empty($data['recurring']) && isset($data['start_time'], $data['duration'])) {
             // Make sure start date is in the future.
-            if ($data['start_time'] < time() && $data['meeting_id'] < 0) {
+            if (!is_string($data['start_time']) && $data['start_time'] < time() && $data['meeting_id'] < 0) {
                 $errors['start_time'] = get_string('err_start_time_past', 'zoom');
             }
 
@@ -1244,31 +1277,51 @@ class mod_zoom_mod_form extends moodleform_mod {
         }
 
         // Pooled-hosts feature (occurrence-first scheduling): validate the
-        // whole plan — extra dates in the future and unique, and (for a new
-        // meeting) a pool host free for EVERY planned slot, so placement is
-        // batch-shaped and a later "wrong host" discovery cannot happen.
+        // whole plan — parseable dates in the future and unique, and (for a
+        // new meeting) a pool host free for EVERY planned slot, so placement
+        // is batch-shaped and a later "wrong host" discovery cannot happen.
+        // The datetime-local inputs arrive as local wall-clock strings here
+        // (data_postprocessing converts them only on successful submission).
         if (zoom_pooled_group() !== null && empty($data['webinar']) && isset($data['start_time'])) {
+            $parse = function ($value) {
+                return is_string($value) ? zoom_pooled_parse_local($value) : (int) $value;
+            };
             $planduration = (int) ($data['duration'] ?? 0) ?: HOURSECS;
-            $seen = [(int) $data['start_time'] => true];
-            foreach ((array) ($data['plandates'] ?? []) as $i => $date) {
-                if ((int) $date <= 0) {
-                    continue;
+            $isnew = ($data['meeting_id'] ?? -1) < 0;
+
+            $starttime = $parse($data['start_time']);
+            if ($isnew) {
+                if ($starttime <= 0) {
+                    $errors['start_time'] = get_string('occ_err_baddate', 'mod_zoom');
+                } else if ($starttime < time()) {
+                    $errors['start_time'] = get_string('err_start_time_past', 'zoom');
+                }
+            }
+
+            $plan = [$starttime => true];
+            foreach ((array) ($data['plandates'] ?? []) as $i => $raw) {
+                if (is_string($raw) && trim($raw) === '') {
+                    continue; // Unused plan row.
                 }
 
-                if ((int) $date < time()) {
+                $date = $parse($raw);
+                if ($date <= 0) {
+                    $errors["plandates[$i]"] = get_string('occ_err_baddate', 'mod_zoom');
+                } else if ($date < time()) {
                     $errors["plandates[$i]"] = get_string('err_start_time_past', 'zoom');
-                } else if (isset($seen[(int) $date])) {
+                } else if (isset($plan[$date])) {
                     $errors["plandates[$i]"] = get_string('err_plandate_duplicate', 'mod_zoom');
                 }
 
-                $seen[(int) $date] = true;
+                $plan[$date] = true;
             }
 
-            if (empty($errors) && ($data['meeting_id'] ?? -1) < 0) {
-                $plan = zoom_pooled_collect_plan((object) $data);
+            if (empty($errors) && $isnew) {
+                $dates = array_keys($plan);
+                sort($dates);
                 $slots = array_map(function ($date) use ($planduration) {
                     return [$date, $planduration];
-                }, $plan);
+                }, $dates);
                 try {
                     zoom_pooled_pick_host((object) [
                         'meeting_id' => -1,
@@ -1413,5 +1466,32 @@ class mod_zoom_mod_form extends moodleform_mod {
         }
 
         return $errors;
+    }
+}
+
+/**
+ * Native datetime-local input element (occurrence-first scheduling).
+ *
+ * A real calendar picker that shows weekdays — far easier for planning
+ * specific weekdays than the dropdown-based date_time_selector. Values
+ * travel as local wall-clock strings ('Y-m-d\TH:i'), converted to epochs in
+ * the form's data_postprocessing() / parsed in validation().
+ */
+class mod_zoom_datetimelocal_form_element extends HTML_QuickForm_input {
+    /**
+     * Constructor.
+     *
+     * @param ?string $elementname Element name.
+     * @param ?string $elementlabel Element label.
+     * @param ?array $attributes Extra attributes.
+     */
+    public function __construct($elementname = null, $elementlabel = null, $attributes = null) {
+        if (!is_array($attributes)) {
+            $attributes = [];
+        }
+
+        $attributes['class'] = trim(($attributes['class'] ?? '') . ' form-control');
+        parent::__construct($elementname, $elementlabel, $attributes);
+        $this->setType('datetime-local');
     }
 }
