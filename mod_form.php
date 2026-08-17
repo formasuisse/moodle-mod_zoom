@@ -522,7 +522,10 @@ class mod_zoom_mod_form extends moodleform_mod {
             get_string('showschedule', 'zoom'),
             get_string('showscheduleonview', 'zoom')
         );
-        $mform->setDefault('show_schedule', $config->defaultshowschedule);
+        // Pooled-hosts feature (occurrence-first scheduling): the sessions
+        // table replaces the Schedule box as the default schedule surface —
+        // the box stays available on demand (both render when enabled).
+        $mform->setDefault('show_schedule', $pooled ? 0 : $config->defaultshowschedule);
         $mform->addHelpButton('show_schedule', 'showschedule', 'zoom');
 
         // Add registration widget.

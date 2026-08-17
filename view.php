@@ -268,7 +268,7 @@ if (zoom_pooled_group() !== null && empty($zoom->webinar)
     echo $occurrencetable;
 }
 
-if ($zoom->show_schedule && $occurrencetable === '') {
+if ($zoom->show_schedule) {
     echo $OUTPUT->box_start('', 'zoom_section-schedule');
     // Output "Schedule" heading.
     echo $OUTPUT->heading(get_string('schedule', 'mod_zoom'), 3);

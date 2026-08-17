@@ -1600,6 +1600,15 @@ function zoom_pooled_sync_occurrences($zoomid, array $occurrences) {
         }
 
         $status = ($occurrence->status ?? '') === 'deleted' ? 'deleted' : 'available';
+        // 'removed' is a Moodle-side refinement of Zoom's tombstone: the
+        // occurrence was struck before it was ever really planned, so the
+        // table hides it instead of showing a cancellation. Zoom cannot
+        // distinguish the two (both are the same permanent tombstone) —
+        // preserve the local refinement across syncs.
+        if ($status === 'deleted' && isset($existing[$occurrenceid]) && $existing[$occurrenceid]->status === 'removed') {
+            $status = 'removed';
+        }
+
         $seen[$occurrenceid] = true;
 
         if (isset($existing[$occurrenceid])) {
@@ -1719,6 +1728,15 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         ]];
     }
 
+    // 'removed' rows were struck before they were ever really planned —
+    // invisible to everyone (unlike cancelled ones, which stay listed).
+    $rows = array_values(array_filter($rows, function ($row) {
+        return $row->status !== 'removed';
+    }));
+    if (empty($rows)) {
+        return '';
+    }
+
     // Video recordings grouped by local calendar day of the recording start.
     $recordingsbyday = [];
     if (get_config('zoom', 'viewrecordings')) {
@@ -1751,10 +1769,34 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         $table->head[] = '';
     }
 
+    $canedit = $iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS;
+    // Inputs live in table cells while their <form> sits in the actions cell
+    // — tied together by the HTML5 form="" attribute (no JS, valid nesting).
+    $formhiddens = function ($formid, $action, $occurrenceid = '') use ($cm) {
+        $html = html_writer::start_tag('form', [
+            'id' => $formid, 'method' => 'post',
+            'action' => new moodle_url('/mod/zoom/occurrence.php'),
+        ]);
+        $html .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'id', 'value' => $cm->id]);
+        $html .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'action', 'value' => $action]);
+        $html .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'occurrence', 'value' => $occurrenceid]);
+        $html .= html_writer::empty_tag('input', ['type' => 'hidden', 'name' => 'sesskey', 'value' => sesskey()]);
+        return $html;
+    };
+    $localinput = function ($epoch) {
+        [$local] = zoom_pooled_local_start($epoch);
+        return substr($local, 0, 16); // Y-m-d\TH:i for <input type="datetime-local">.
+    };
+
     $now = time();
+    $lastactive = null;
     foreach ($rows as $row) {
         $cancelled = ($row->status === 'deleted');
         $past = !$cancelled && ($row->starttime + ($row->duration ?: HOURSECS)) < $now;
+        $editable = $canedit && !$cancelled && !$past && $row->occurrenceid !== '';
+        if (!$cancelled) {
+            $lastactive = $row;
+        }
 
         $datetext = userdate($row->starttime, get_string('strftimedaydatetime', 'langconfig'));
         if ($cancelled) {
@@ -1766,7 +1808,24 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
             $status = html_writer::span(get_string('occ_upcoming', 'mod_zoom'), 'badge badge-info');
         }
 
-        $cells = [$datetext, $cancelled ? '' : format_time((int) ($row->duration ?: $zoom->duration)), $status];
+        if ($editable) {
+            $formid = 'zoom-occ-move-' . $row->occurrenceid;
+            $datecell = html_writer::empty_tag('input', [
+                'type' => 'datetime-local', 'name' => 'newdatetime', 'form' => $formid,
+                'value' => $localinput((int) $row->starttime), 'required' => 'required',
+                'class' => 'form-control d-inline-block w-auto',
+            ]);
+            $durationcell = html_writer::empty_tag('input', [
+                'type' => 'number', 'name' => 'newduration', 'form' => $formid,
+                'value' => (int) round(($row->duration ?: $zoom->duration) / 60), 'min' => 1, 'max' => 1440,
+                'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
+            ]) . ' min';
+        } else {
+            $datecell = $datetext;
+            $durationcell = $cancelled ? '' : format_time((int) ($row->duration ?: $zoom->duration));
+        }
+
+        $cells = [$datecell, $durationcell, $status];
 
         if (!empty($recordingsbyday) || $iszoommanager) {
             $links = [];
@@ -1786,32 +1845,67 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
         }
 
         if ($iszoommanager) {
-            $actions = [];
-            if (!$cancelled && !$past && $row->occurrenceid !== '' && !empty($zoom->recurring)) {
-                $moveurl = new moodle_url('/mod/zoom/occurrence.php', [
-                    'id' => $cm->id, 'action' => 'move', 'occurrence' => $row->occurrenceid,
+            $actions = '';
+            if ($editable) {
+                $formid = 'zoom-occ-move-' . $row->occurrenceid;
+                $actions .= $formhiddens($formid, 'move', $row->occurrenceid);
+                $actions .= html_writer::empty_tag('input', [
+                    'type' => 'submit', 'value' => get_string('savechanges'),
+                    'class' => 'btn btn-secondary btn-sm mr-1',
                 ]);
-                $cancelurl = new moodle_url('/mod/zoom/occurrence.php', [
-                    'id' => $cm->id, 'action' => 'cancel', 'occurrence' => $row->occurrenceid, 'sesskey' => sesskey(),
-                ]);
-                $actions[] = html_writer::link($moveurl, get_string('occ_move', 'mod_zoom'));
-                $actions[] = html_writer::link($cancelurl, get_string('occ_cancel', 'mod_zoom'));
+                $actions .= html_writer::end_tag('form');
+                $actions .= ' ' . html_writer::link(new moodle_url('/mod/zoom/occurrence.php', [
+                    'id' => $cm->id, 'action' => 'cancel', 'occurrence' => $row->occurrenceid,
+                ]), get_string('occ_cancel', 'mod_zoom'));
+                $actions .= ' | ' . html_writer::link(new moodle_url('/mod/zoom/occurrence.php', [
+                    'id' => $cm->id, 'action' => 'delete', 'occurrence' => $row->occurrenceid,
+                ]), get_string('occ_delete', 'mod_zoom'));
+            } else if ($canedit && $cancelled && $row->occurrenceid !== '') {
+                // Cancellation artifact cleanup: hide it from the list.
+                $actions .= html_writer::link(new moodle_url('/mod/zoom/occurrence.php', [
+                    'id' => $cm->id, 'action' => 'remove', 'occurrence' => $row->occurrenceid, 'sesskey' => sesskey(),
+                ]), get_string('occ_remove', 'mod_zoom'));
             }
 
-            $cells[] = implode(' | ', $actions);
+            $cells[] = $actions;
         }
 
         $table->data[] = $cells;
     }
 
+    // Inline add row: prefilled one week after the last active session.
+    if ($canedit) {
+        $adddefault = $lastactive ? ((int) $lastactive->starttime + WEEKSECS) : ($now + DAYSECS);
+        $adddurationdefault = (int) round((($lastactive->duration ?? 0) ?: $zoom->duration) / 60);
+        $addcells = [
+            html_writer::empty_tag('input', [
+                'type' => 'datetime-local', 'name' => 'newdatetime', 'form' => 'zoom-occ-add',
+                'value' => $localinput($adddefault), 'required' => 'required',
+                'class' => 'form-control d-inline-block w-auto',
+            ]),
+            html_writer::empty_tag('input', [
+                'type' => 'number', 'name' => 'newduration', 'form' => 'zoom-occ-add',
+                'value' => $adddurationdefault, 'min' => 1, 'max' => 1440,
+                'class' => 'form-control d-inline-block', 'style' => 'width:5.5em',
+            ]) . ' min',
+            html_writer::span(get_string('occ_addnew', 'mod_zoom'), 'text-muted'),
+        ];
+        if (!empty($recordingsbyday) || $iszoommanager) {
+            $addcells[] = '';
+        }
+
+        $addcells[] = $formhiddens('zoom-occ-add', 'add')
+            . html_writer::empty_tag('input', [
+                'type' => 'submit', 'value' => get_string('occ_add', 'mod_zoom'),
+                'class' => 'btn btn-primary btn-sm',
+            ])
+            . html_writer::end_tag('form');
+        $table->data[] = $addcells;
+    }
+
     $html = $OUTPUT->box_start('', 'zoom_section-occurrences');
     $html .= $OUTPUT->heading(get_string('occurrences', 'mod_zoom'), 3);
     $html .= html_writer::table($table);
-    if ($iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS) {
-        $addurl = new moodle_url('/mod/zoom/occurrence.php', ['id' => $cm->id, 'action' => 'add']);
-        $html .= html_writer::div(html_writer::link($addurl, get_string('occ_add', 'mod_zoom'), ['class' => 'btn btn-secondary']));
-    }
-
     $html .= $OUTPUT->box_end();
     return $html;
 }
@@ -1986,19 +2080,25 @@ function zoom_pooled_occurrence_move($zoom, $occurrenceid, $start, $duration) {
 }
 
 /**
- * Cancel an occurrence of a pooled series.
+ * Cancel (or fully delete) an occurrence of a pooled series.
  *
  * Deletion is a permanent tombstone on Zoom (measured 2026-08-16): it
- * survives any later meeting PATCH and frees the host's slot. The last
- * remaining active occurrence cannot be cancelled — delete the activity
- * instead (Zoom may drop the whole meeting with its final occurrence).
+ * survives any later meeting PATCH and frees the host's slot. Moodle-side
+ * the tombstone has two flavors: a CANCELLED session stays visible in the
+ * table (struck through — it was planned, students should see the change),
+ * a DELETED one is hidden entirely (it was never really planned — e.g. a
+ * scaffold surplus). The last remaining active occurrence cannot be
+ * cancelled — delete the activity instead (Zoom may drop the whole meeting
+ * with its final occurrence).
  *
  * @param stdClass $zoom zoom record.
  * @param string $occurrenceid Zoom occurrence_id.
+ * @param bool $remove True = hide from the table too ('removed'), false =
+ *        show as cancelled ('deleted').
  * @return void
  * @throws moodle_exception zoomerr_last_occurrence when it is the last one.
  */
-function zoom_pooled_occurrence_cancel($zoom, $occurrenceid) {
+function zoom_pooled_occurrence_cancel($zoom, $occurrenceid, $remove = false) {
     global $DB;
 
     $active = $DB->count_records('zoom_occurrences', ['zoomid' => $zoom->id, 'status' => 'available']);
@@ -2008,6 +2108,34 @@ function zoom_pooled_occurrence_cancel($zoom, $occurrenceid) {
 
     zoom_webservice()->delete_meeting_occurrence($zoom, $occurrenceid);
     zoom_pooled_refresh_from_zoom($zoom);
+    if ($remove) {
+        zoom_pooled_occurrence_remove($zoom, $occurrenceid);
+    }
+}
+
+/**
+ * Hide a cancelled occurrence from the sessions table ('removed').
+ *
+ * Moodle-only operation — the Zoom tombstone is untouchable either way.
+ * Used directly to clean up cancellation artifacts (occurrences struck
+ * during series construction that were never planned from the students'
+ * perspective).
+ *
+ * @param stdClass $zoom zoom record.
+ * @param string $occurrenceid Zoom occurrence_id.
+ * @return void
+ */
+function zoom_pooled_occurrence_remove($zoom, $occurrenceid) {
+    global $DB;
+
+    $row = $DB->get_record('zoom_occurrences', ['zoomid' => $zoom->id, 'occurrenceid' => $occurrenceid], '*', MUST_EXIST);
+    if ($row->status !== 'removed') {
+        $DB->update_record('zoom_occurrences', (object) [
+            'id' => $row->id,
+            'status' => 'removed',
+            'timemodified' => time(),
+        ]);
+    }
 }
 
 /**
