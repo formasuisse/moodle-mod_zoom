@@ -1802,13 +1802,10 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     $slotinputs = function ($formid, $epoch) {
         [$local] = zoom_pooled_local_start($epoch);
         $time = substr($local, 11, 5);
-        $datehtml = html_writer::start_div('input-group d-inline-flex w-auto align-middle');
-        $datehtml .= html_writer::div(
-            html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', [
-                'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
-            ]),
-            'input-group-prepend'
-        );
+        $datehtml = html_writer::start_div('input-group d-inline-flex w-auto align-middle flex-nowrap');
+        $datehtml .= html_writer::span(userdate($epoch, '%a'), 'input-group-text zoom-occ-weekday', [
+            'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
+        ]);
         $datehtml .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'newdate', 'form' => $formid,
             'value' => substr($local, 0, 10), 'required' => 'required',
@@ -2049,14 +2046,11 @@ function zoom_pooled_date_companion() {
         'aria-label' => get_string('occ_date', 'mod_zoom'),
         'class' => 'form-control w-auto zoom-occ-datetext d-none',
     ]);
-    $html .= html_writer::div(
-        html_writer::tag('button', $OUTPUT->pix_icon('i/calendar', ''), [
-            'type' => 'button', 'tabindex' => '-1',
-            'aria-label' => get_string('calendar', 'calendar'),
-            'class' => 'btn btn-outline-secondary zoom-occ-datebtn d-none',
-        ]),
-        'input-group-append d-inline-flex'
-    );
+    $html .= html_writer::tag('button', $OUTPUT->pix_icon('i/calendar', ''), [
+        'type' => 'button', 'tabindex' => '-1',
+        'aria-label' => get_string('calendar', 'calendar'),
+        'class' => 'btn btn-outline-secondary zoom-occ-datebtn d-none',
+    ]);
     return $html;
 }
 
@@ -2087,13 +2081,10 @@ function zoom_pooled_planner_html($rows = 30) {
         $html .= html_writer::start_div('mb-1 zoom-occ-planner-row' . ($first ? '' : ' d-none'), [
             'data-zoom-occ-row' => $i,
         ]);
-        $html .= html_writer::start_div('input-group d-inline-flex w-auto mr-1 align-middle');
-        $html .= html_writer::div(
-            html_writer::span('', 'input-group-text zoom-occ-weekday', [
-                'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
-            ]),
-            'input-group-prepend'
-        );
+        $html .= html_writer::start_div('input-group d-inline-flex w-auto mr-1 align-middle flex-nowrap');
+        $html .= html_writer::span('', 'input-group-text zoom-occ-weekday', [
+            'data-zoom-occ-weekday' => 1, 'style' => 'min-width:3.2em;justify-content:center',
+        ]);
         $html .= html_writer::empty_tag('input', [
             'type' => 'date', 'name' => 'zoomplan_date[]',
             'value' => $first ? $defaultdate : '',
