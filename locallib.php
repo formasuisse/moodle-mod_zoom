@@ -1754,7 +1754,10 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
     }
 
     $table = new html_table();
-    $table->attributes['class'] = 'generaltable mod_view';
+    // w-100: the auto-width table otherwise sits as a small island on the
+    // page's left edge while the rest of the activity page reads as a full
+    // content-width block.
+    $table->attributes['class'] = 'generaltable w-100';
     $table->id = 'zoom_occurrence_table';
     $table->head = [
         get_string('occ_date', 'mod_zoom'),
