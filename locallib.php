@@ -1880,7 +1880,11 @@ function zoom_pooled_occurrence_table($zoom, $cm, $iszoommanager) {
                         $label .= ' ' . get_string('occ_recording_hidden', 'mod_zoom');
                     }
 
-                    $links[] = html_writer::link($url, $label, ['target' => '_blank']);
+                    $links[] = html_writer::link($url, $label, [
+                        'target' => '_blank',
+                        'title' => get_string('occ_recording_started', 'mod_zoom',
+                            userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'))),
+                    ]);
                 }
             }
 

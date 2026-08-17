@@ -97,6 +97,7 @@ $string['occ_planner_weekly'] = '+5s';
 $string['occ_planner_weekly_help'] = 'Ajoute 5 occurrences hebdomadaires à la suite de cette ligne (même jour de semaine, mêmes heure et durée)';
 $string['occ_recording'] = 'Enregistrement';
 $string['occ_recording_hidden'] = '(masqué pour les étudiant·e·s)';
+$string['occ_recording_started'] = 'Enregistrement démarré à {$a}';
 $string['occ_remove'] = 'Retirer de la liste';
 $string['occ_revert'] = 'Rétablir';
 $string['occ_removed_notify'] = 'Occurrence retirée de la liste.';

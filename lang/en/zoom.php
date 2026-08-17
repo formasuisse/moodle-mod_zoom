@@ -239,6 +239,7 @@ $string['occ_deleted_notify'] = 'Occurrence deleted.';
 $string['occ_err_baddate'] = 'This date could not be understood.';
 $string['occ_err_past'] = 'Past occurrences cannot be changed.';
 $string['occ_moved_notify'] = 'Occurrence moved.';
+$string['occ_recording_started'] = 'Recording started at {$a}';
 $string['occ_remove'] = 'Remove from list';
 $string['occ_revert'] = 'Revert';
 $string['occ_removed_notify'] = 'Occurrence removed from the list.';
