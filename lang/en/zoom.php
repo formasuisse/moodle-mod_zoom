@@ -246,6 +246,7 @@ $string['plandatesadd'] = 'Add {no} more sessions';
 $string['plandatesintro'] = 'Plan every session of this meeting here — they all share one join link and one recordings list. A host is booked for the whole plan when you save; afterwards, sessions are added, moved or cancelled one by one in the sessions table on the activity page.';
 $string['schedulemanagedintable'] = 'The schedule of this meeting is managed session by session in the sessions table on the <a href="{$a}">activity page</a>.';
 $string['zoomerr_last_occurrence'] = 'The last remaining session cannot be cancelled — delete the activity instead.';
+$string['zoomerr_pool_nousable'] = 'The host pool Zoom group "{$a}" has no usable members: it is empty, or none of its members hold a license while only licensed hosts may host (zoom | pooledrequirelicense). No sessions can be scheduled until this is fixed.';
 $string['zoomerr_occurrence_limit'] = 'This meeting has reached the maximum number of sessions (60, counting cancelled ones). Create a new activity for further sessions.';
 $string['joinbeforehost'] = 'Join meeting before host';
 $string['joinbeforehostenable'] = 'Allow participants to join anytime';

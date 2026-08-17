@@ -1463,12 +1463,15 @@ function zoom_pooled_members($context = null) {
 
     // Empty pool — whether the group has no members or none survive the
     // license filter — is a configuration problem, not a capacity signal.
+    // Distinct message: "group unreadable" sent a debugging session the
+    // wrong way when the actual cause was a Basic-only pool under the
+    // licensed-only filter (local dev, 2026-08-17).
     if (empty($members)) {
         \mod_zoom\event\pool_misconfigured::create([
             'context' => $context ?? context_system::instance(),
             'other' => ['group' => $groupname],
         ])->trigger();
-        throw new moodle_exception('zoomerr_pool_misconfigured', 'mod_zoom', '', $groupname);
+        throw new moodle_exception('zoomerr_pool_nousable', 'mod_zoom', '', $groupname);
     }
 
     return array_values($members);
