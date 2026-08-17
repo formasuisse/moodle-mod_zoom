@@ -2041,6 +2041,7 @@ function zoom_pooled_apply_plan($zoom, array $occurrences, array $slots) {
  * @return string HTML (hidden until the module activates it).
  */
 function zoom_pooled_date_companion() {
+    global $OUTPUT;
     $html = html_writer::empty_tag('input', [
         'type' => 'text', 'size' => 10, 'maxlength' => 10,
         'placeholder' => get_string('occ_dateformat', 'mod_zoom'),
@@ -2049,7 +2050,7 @@ function zoom_pooled_date_companion() {
         'class' => 'form-control w-auto zoom-occ-datetext d-none',
     ]);
     $html .= html_writer::div(
-        html_writer::tag('button', '📅', [
+        html_writer::tag('button', $OUTPUT->pix_icon('i/calendar', ''), [
             'type' => 'button', 'tabindex' => '-1',
             'aria-label' => get_string('calendar', 'calendar'),
             'class' => 'btn btn-outline-secondary zoom-occ-datebtn d-none',
