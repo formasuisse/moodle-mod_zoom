@@ -1,0 +1,212 @@
+{{!
+    This file is part of Moodle - http://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_zoom/pooled_occurrence_table
+
+    Occurrence table for a pooled meeting (occurrence-first scheduling): the
+    single schedule surface — one row per occurrence with inline video
+    recordings; managers get add/move/cancel actions (occurrence.php).
+
+    Markup notes:
+    * w-100 on the table: the auto-width table otherwise sits as a small
+      island on the page's left edge while the rest of the activity page
+      reads as a full content-width block.
+    * Editable rows carry text views (.zoom-occ-view) next to pre-hidden
+      inputs (.zoom-occ-edit d-none); the row's Edit button swaps them, one
+      row at a time, and locks the other rows' Edit buttons — a Save can
+      then never discard half-done edits elsewhere. Save is grey until the
+      row is dirty, Revert restores and unlocks (mod_zoom/occurrences).
+    * Inputs live in table cells while their <form> sits in the actions cell
+      — tied together by the HTML5 form="" attribute (no JS, valid nesting).
+      The form must stay inside the <tr>: the JS finds the row via
+      form.closest('tr').
+    * The add form is a native <details> (no JS): the inputs only appear
+      once "Add an occurrence" is clicked.
+
+    Context variables required for this template:
+    * ismanager Viewer manages this activity (recordings toggle, actions).
+    * canedit Occurrence editing available (recurring, exists on Zoom).
+    * showrecordings Whether the recordings column renders.
+    * cmid Course module id.
+    * sesskey Session key for the POST forms.
+    * actionurl occurrence.php URL the forms post to.
+    * occurrences Array of row contexts — see example.
+    * addform Add-occurrence form context, or absent.
+
+    Example context (json):
+    {
+        "ismanager": true,
+        "canedit": true,
+        "showrecordings": true,
+        "cmid": 3,
+        "sesskey": "abcdef",
+        "actionurl": "https://example.com/mod/zoom/occurrence.php",
+        "occurrences": [
+            {
+                "datetext": "Monday, 24 August 2026",
+                "timetext": "10:00",
+                "durationtext": "1 hour",
+                "cancelled": false,
+                "past": false,
+                "upcoming": true,
+                "editable": true,
+                "formid": "zoom-occ-move-1",
+                "occurrenceid": "1691000000000",
+                "durationminutes": 60,
+                "slot": {
+                    "name": "newdate",
+                    "value": "2026-08-24",
+                    "weekday": "Mon",
+                    "formid": "zoom-occ-move-1",
+                    "required": true,
+                    "hidden": true,
+                    "timeoptions": [{"value": "10:00", "selected": true}]
+                },
+                "recordings": [
+                    {
+                        "url": "https://example.com/mod/zoom/loadrecording.php?id=3&recordingid=7",
+                        "label": "Recording",
+                        "title": "Started at 10:02",
+                        "hidden": false,
+                        "first": true,
+                        "toggleurl": "https://example.com/mod/zoom/occurrence.php?id=3&action=recshow"
+                    }
+                ],
+                "cancelurl": "https://example.com/mod/zoom/occurrence.php?id=3&action=cancel",
+                "deleteurl": "https://example.com/mod/zoom/occurrence.php?id=3&action=delete",
+                "removeurl": null
+            }
+        ],
+        "addform": {
+            "formid": "zoom-occ-add",
+            "durationminutes": 60,
+            "slot": {
+                "name": "newdate",
+                "value": "2026-08-31",
+                "weekday": "Mon",
+                "formid": "zoom-occ-add",
+                "required": true,
+                "hidden": false,
+                "timeoptions": [{"value": "10:00", "selected": true}]
+            }
+        }
+    }
+}}
+<div id="zoom_section-occurrences" class="box py-3">
+    <h3>{{#str}} occurrences, mod_zoom {{/str}}</h3>
+    <div class="table-responsive">
+    <table id="zoom_occurrence_table" class="generaltable w-100">
+        <thead>
+            <tr>
+                <th scope="col">{{#str}} occ_date, mod_zoom {{/str}}</th>
+                <th scope="col">{{#str}} occ_time, mod_zoom {{/str}}</th>
+                <th scope="col">{{#str}} occ_duration, mod_zoom {{/str}}</th>
+                <th scope="col">{{#str}} occ_status, mod_zoom {{/str}}</th>
+                {{#showrecordings}}<th scope="col">{{#str}} recordings, mod_zoom {{/str}}</th>{{/showrecordings}}
+                {{#ismanager}}<th scope="col"></th>{{/ismanager}}
+            </tr>
+        </thead>
+        <tbody>
+            {{#occurrences}}
+            <tr>
+                <td>
+                    {{#editable}}
+                        <span class="zoom-occ-view">{{datetext}}</span>
+                        {{#slot}}{{> mod_zoom/pooled_date_input }}{{/slot}}
+                    {{/editable}}
+                    {{^editable}}{{#cancelled}}<s>{{datetext}}</s>{{/cancelled}}{{^cancelled}}{{datetext}}{{/cancelled}}{{/editable}}
+                </td>
+                <td>
+                    {{#editable}}
+                        <span class="zoom-occ-view">{{timetext}}</span>
+                        {{#slot}}{{> mod_zoom/pooled_time_select }}{{/slot}}
+                    {{/editable}}
+                    {{^editable}}{{#cancelled}}<s>{{timetext}}</s>{{/cancelled}}{{^cancelled}}{{timetext}}{{/cancelled}}{{/editable}}
+                </td>
+                <td>
+                    {{#editable}}
+                        <span class="zoom-occ-view">{{durationtext}}</span>
+                        <span class="zoom-occ-edit d-none text-nowrap"><input type="number" name="newduration"
+                            form="{{formid}}" value="{{durationminutes}}" min="1" max="1440"
+                            class="form-control d-inline-block" style="width:5.5em"> min</span>
+                    {{/editable}}
+                    {{^editable}}{{durationtext}}{{/editable}}
+                </td>
+                <td>
+                    {{#cancelled}}<span class="badge badge-secondary text-muted">{{#str}} occ_cancelled, mod_zoom {{/str}}</span>{{/cancelled}}
+                    {{#past}}<span class="badge badge-light">{{#str}} occ_past, mod_zoom {{/str}}</span>{{/past}}
+                    {{#upcoming}}<span class="badge badge-info">{{#str}} occ_upcoming, mod_zoom {{/str}}</span>{{/upcoming}}
+                </td>
+                {{#showrecordings}}
+                <td>
+                    {{#recordings}}
+                        {{^first}}<span class="text-muted">·</span>{{/first}}
+                        <a href="{{url}}" target="_blank" {{#hidden}}class="text-muted"{{/hidden}} title="{{title}}">{{label}}</a>
+                        {{#toggleurl}}
+                            <span class="small">(<a href="{{toggleurl}}">{{#hidden}}{{#str}} occ_rec_show, mod_zoom {{/str}}{{/hidden}}{{^hidden}}{{#str}} occ_rec_hide, mod_zoom {{/str}}{{/hidden}}</a>)</span>
+                        {{/toggleurl}}
+                    {{/recordings}}
+                </td>
+                {{/showrecordings}}
+                {{#ismanager}}
+                <td>
+                    <div class="text-nowrap">
+                        {{#editable}}
+                            <button type="button" data-zoom-occ-editrow="1" class="btn btn-secondary btn-sm mr-1">{{#str}} edit {{/str}}</button>
+                            <form id="{{formid}}" method="post" class="d-inline" action="{{actionurl}}">
+                                <input type="hidden" name="id" value="{{cmid}}">
+                                <input type="hidden" name="action" value="move">
+                                <input type="hidden" name="occurrence" value="{{occurrenceid}}">
+                                <input type="hidden" name="sesskey" value="{{sesskey}}">
+                                <input type="submit" value="{{#str}} savechanges {{/str}}" class="btn btn-secondary btn-sm mr-1 zoom-occ-edit d-none">
+                                <button type="button" data-zoom-occ-revert="1" class="btn btn-link btn-sm zoom-occ-edit d-none">{{#str}} occ_revert, mod_zoom {{/str}}</button>
+                            </form>
+                            <a href="{{cancelurl}}">{{#str}} occ_cancel, mod_zoom {{/str}}</a> |
+                            <a href="{{deleteurl}}">{{#str}} occ_delete, mod_zoom {{/str}}</a>
+                        {{/editable}}
+                        {{! Cancellation artifact cleanup: hide it from the list. }}
+                        {{#removeurl}}<a href="{{removeurl}}">{{#str}} occ_remove, mod_zoom {{/str}}</a>{{/removeurl}}
+                    </div>
+                </td>
+                {{/ismanager}}
+            </tr>
+            {{/occurrences}}
+        </tbody>
+    </table>
+    </div>
+    {{#addform}}
+    <details class="mb-2">
+        <summary class="btn btn-secondary">{{#str}} occ_add, mod_zoom {{/str}}</summary>
+        <div class="p-2">
+            {{#slot}}
+                {{> mod_zoom/pooled_date_input }}
+                {{> mod_zoom/pooled_time_select }}
+            {{/slot}}
+            <input type="number" name="newduration" form="{{formid}}" value="{{durationminutes}}" min="1" max="1440"
+                class="form-control d-inline-block" style="width:5.5em"> min
+            <form id="{{formid}}" method="post" class="d-inline" action="{{actionurl}}">
+                <input type="hidden" name="id" value="{{cmid}}">
+                <input type="hidden" name="action" value="add">
+                <input type="hidden" name="occurrence" value="">
+                <input type="hidden" name="sesskey" value="{{sesskey}}">
+                <input type="submit" value="{{#str}} occ_add, mod_zoom {{/str}}" class="btn btn-primary btn-sm ml-2">
+                <button type="button" data-zoom-occ-close="1" class="btn btn-link btn-sm">{{#str}} cancel {{/str}}</button>
+            </form>
+        </div>
+    </details>
+    {{/addform}}
+</div>

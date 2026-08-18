@@ -250,15 +250,6 @@ define([], function() {
                 if (buttons) {
                     buttons.classList.remove('d-none');
                 }
-                var lastFilled = function() {
-                    var found = null;
-                    rows.forEach(function(row) {
-                        if (fieldOf(row, 'date').value) {
-                            found = row;
-                        }
-                    });
-                    return found;
-                };
                 var addrow = planner.querySelector('[data-zoom-occ-addrow]');
                 if (addrow) {
                     addrow.addEventListener('click', function(e) {

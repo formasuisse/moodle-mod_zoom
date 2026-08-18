@@ -279,7 +279,8 @@ class mod_zoom_mod_form extends moodleform_mod {
                     'static',
                     'plandatesplanner',
                     get_string('occurrences', 'mod_zoom'),
-                    get_string('plandatesintro', 'mod_zoom') . zoom_pooled_planner_html()
+                    get_string('plandatesintro', 'mod_zoom')
+                        . $OUTPUT->render_from_template('mod_zoom/pooled_planner', zoom_pooled_planner_context())
                 );
             } else {
                 // Add date/time. Validation in validation().
