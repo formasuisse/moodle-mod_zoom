@@ -2081,6 +2081,11 @@ function zoom_pooled_planner_submitted() {
             'start' => preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)
                 ? zoom_pooled_parse_local(trim($date) . ' ' . $time) : 0,
             'minutes' => (int) ($minutes[$i] ?? 0),
+            // Raw input values, for pointing back at the planner row
+            // (conflict marking matches rows by value, not position — the
+            // client-side sort moves values between row elements).
+            'date' => trim($date),
+            'time' => $time,
         ];
     }
 
@@ -2301,12 +2306,17 @@ function zoom_pooled_occurrence_hide($zoom, $occurrenceid) {
  *
  * @param stdClass $zoom The meeting as built from the form.
  * @param array $slots [start (Unix timestamp), duration (seconds)] pairs;
- *        empty = nothing to check (first member wins).
+ *        empty = nothing to check (first member wins). Extra elements per
+ *        pair are carried through untouched (callers use them to map a
+ *        blocking slot back to its form row).
  * @param ?context $context Module/course context for events.
+ * @param ?array $blocking Out: on pool-exhausted failure, the $slots
+ *        entries no host was free for.
  * @return string The chosen Zoom user ID.
  * @throws moodle_exception When no pool host is free for every slot.
  */
-function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
+function zoom_pooled_pick_host($zoom, array $slots, $context = null, &$blocking = null) {
+    $blocking = [];
     $members = zoom_pooled_members($context);
 
     // Registration is a licensed-host feature (an unlicensed host's
@@ -2358,15 +2368,18 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
     // Say WHICH occurrences blocked the plan: the slots that clashed on
     // every host are the ones no host choice can fix (when no slot clashes
     // everywhere, fall back to everything that clashed anywhere).
-    $blocking = empty($clashsets) ? [] : array_intersect(...$clashsets);
-    if (empty($blocking) && !empty($clashsets)) {
-        $blocking = array_unique(array_merge(...$clashsets));
+    $blockingidx = empty($clashsets) ? [] : array_intersect(...$clashsets);
+    if (empty($blockingidx) && !empty($clashsets)) {
+        $blockingidx = array_unique(array_merge(...$clashsets));
     }
-    if (!empty($blocking)) {
-        sort($blocking);
+    if (!empty($blockingidx)) {
+        sort($blockingidx);
+        $blocking = array_map(function ($i) use ($slots) {
+            return $slots[$i];
+        }, $blockingidx);
         $dates = array_map(function ($i) use ($slots) {
             return userdate($slots[$i][0], get_string('strftimedatetimeshort', 'langconfig'));
-        }, $blocking);
+        }, $blockingidx);
         throw new moodle_exception('zoomerr_pool_exhausted_slots', 'mod_zoom', '', implode(', ', $dates));
     }
 

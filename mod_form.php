@@ -1282,7 +1282,10 @@ class mod_zoom_mod_form extends moodleform_mod {
                     }
 
                     $plan[$row['start']] = true;
-                    $slots[] = [$row['start'], $row['minutes'] * 60];
+                    // Third element: the row's raw inputs, carried through
+                    // pick_host untouched so a blocking slot can be pointed
+                    // back at its planner row.
+                    $slots[] = [$row['start'], $row['minutes'] * 60, ['date' => $row['date'], 'time' => $row['time']]];
                 }
 
                 if (!empty($rowerrors)) {
@@ -1296,12 +1299,21 @@ class mod_zoom_mod_form extends moodleform_mod {
                             'meeting_id' => -1,
                             'registration' => $data['registration'] ?? null,
                             'teacherid' => $data['teacherid'] ?? null,
-                        ], $slots, $this->context);
+                        ], $slots, $this->context, $blocking);
                     } catch (moodle_exception $e) {
                         // The message already says which occurrence(s)
                         // clashed (zoomerr_pool_exhausted_slots) or what is
                         // misconfigured (zoomerr_pool_nousable).
                         $errors['plandatesplanner'] = $e->getMessage();
+                        // And mark the clashing rows red in the planner —
+                        // matched by value (the client-side sort moves
+                        // values between row elements, so position is
+                        // meaningless).
+                        $pairs = array_values(array_filter(array_column($blocking ?? [], 2)));
+                        if (!empty($pairs)) {
+                            global $PAGE;
+                            $PAGE->requires->js_call_amd('mod_zoom/occurrences', 'markPlannerConflicts', [$pairs]);
+                        }
                     }
                 }
             }

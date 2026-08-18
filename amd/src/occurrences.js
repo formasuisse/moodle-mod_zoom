@@ -32,6 +32,37 @@
  */
 define([], function() {
     return {
+        /**
+         * Mark the planner rows a pool conflict points at, in red.
+         *
+         * Called from the form's server-side validation alongside the
+         * "no host free for: <dates>" error, so the user does not have to
+         * match dates in the message to lines by hand. Rows are matched by
+         * their date+time VALUES — init()'s compact pass moves values
+         * between row elements, so positions carry no meaning.
+         *
+         * @param {Array} pairs [{date: 'YYYY-MM-DD', time: 'HH:MM'}, ...]
+         */
+        markPlannerConflicts: function(pairs) {
+            var planner = document.querySelector('[data-zoom-occ-planner]');
+            if (!planner || !pairs || !pairs.length) {
+                return;
+            }
+            var keys = {};
+            pairs.forEach(function(pair) {
+                keys[pair.date + 'T' + pair.time] = true;
+            });
+            planner.querySelectorAll('[data-zoom-occ-row]').forEach(function(row) {
+                var date = row.querySelector('input[name="zoomplan_date[]"]');
+                var time = row.querySelector('input[name="zoomplan_time[]"]');
+                if (date && time && keys[date.value + 'T' + time.value]) {
+                    row.querySelectorAll('.form-control').forEach(function(el) {
+                        el.classList.add('is-invalid');
+                    });
+                }
+            });
+        },
+
         init: function() {
             var lang = document.documentElement.lang || undefined;
 
