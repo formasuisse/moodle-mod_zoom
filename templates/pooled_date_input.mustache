@@ -1,0 +1,61 @@
+{{!
+    This file is part of Moodle - http://moodle.org/
+
+    Moodle is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    Moodle is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with Moodle.  If not, see <http://www.gnu.org/licenses/>.
+}}
+{{!
+    @template mod_zoom/pooled_date_input
+
+    Date input for a pooled occurrence slot (occurrence table and planner).
+
+    A native date input gives a real calendar picker (weekdays visible), but
+    displays in the BROWSER's locale — an English-UI browser shows MM/DD/YYYY
+    whatever Moodle's language is. So the input travels with companions: the
+    weekday label makes the schedule validatable at a glance, and the
+    JJ/MM/AAAA text field plus calendar button (both hidden until the
+    mod_zoom/occurrences module activates them) become the visible control —
+    deterministic day/month/year everywhere — while the native input shrinks
+    to an invisible value carrier whose picker opens from the button
+    (showPicker()). Without JS the native input stays as-is.
+
+    Context variables required for this template:
+    * name Input name.
+    * value ISO date (YYYY-MM-DD) or empty.
+    * weekday Short weekday label ('' when JS fills it in).
+    * formid Optional owning form id (HTML5 form="" association).
+    * required Whether the date is required.
+    * hidden Whether the group renders pre-hidden (.zoom-occ-edit d-none).
+    * extraclasses Optional extra classes on the group.
+
+    Example context (json):
+    {
+        "name": "newdate",
+        "value": "2026-08-24",
+        "weekday": "Mon",
+        "formid": "zoom-occ-move-1",
+        "required": true,
+        "hidden": true,
+        "extraclasses": ""
+    }
+}}
+<div class="input-group d-inline-flex w-auto align-middle flex-nowrap{{#hidden}} zoom-occ-edit d-none{{/hidden}}{{#extraclasses}} {{extraclasses}}{{/extraclasses}}">
+    <span class="input-group-text zoom-occ-weekday" data-zoom-occ-weekday="1" style="min-width:3.2em;justify-content:center">{{weekday}}</span>
+    <input type="date" name="{{name}}" value="{{value}}" class="form-control w-auto zoom-occ-date"
+        {{#formid}}form="{{formid}}"{{/formid}} {{#required}}required{{/required}}>
+    <input type="text" size="10" maxlength="10" placeholder="{{#str}} occ_dateformat, mod_zoom {{/str}}"
+        inputmode="numeric" aria-label="{{#str}} occ_date, mod_zoom {{/str}}"
+        class="form-control w-auto zoom-occ-datetext d-none">
+    <button type="button" tabindex="-1" aria-label="{{#str}} calendar, calendar {{/str}}"
+        class="btn btn-outline-secondary zoom-occ-datebtn d-none">{{#pix}} i/calendar, core {{/pix}}</button>
+</div>
