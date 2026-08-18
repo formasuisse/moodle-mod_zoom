@@ -40,6 +40,8 @@ $string['registration_done'] = 'Votre inscription à cette séance est confirmé
 $string['registration_self'] = 'Manuelle — les participant·e·s confirment leur présence par un clic S\'inscrire avant de rejoindre (inscription avec leur nom Moodle)';
 $string['teacher'] = 'Formateur·trice';
 $string['teacher_help'] = 'La personne qui anime cette séance : elle seule voit le bouton Démarrer la réunion. L\'hôte côté Zoom est choisi automatiquement dans le pool d\'hôtes.';
+$string['zoomerr_pool_noregistrationhost'] = 'L\'inscription nécessite un hôte Zoom licencié et le pool n\'en a aucun. Désactivez l\'inscription pour cette réunion, ou ajoutez un hôte licencié au pool.';
+$string['zoomerr_pool_exhausted_slots'] = 'Aucun hôte du pool n\'est libre (± intervalle) pour : {$a}. Modifiez ces dates ou heures — ou le pool a besoin d\'un hôte licencié supplémentaire.';
 $string['zoomerr_pool_exhausted'] = 'Aucun hôte Zoom n\'est disponible pour ce créneau : chaque hôte du pool a une réservation en conflit (y compris l\'intervalle requis entre les séances). Déplacez la séance ou ajoutez un hôte au pool.';
 $string['zoomerr_pool_misconfigured'] = 'Le groupe Zoom du pool d\'hôtes « {$a} » n\'existe pas ou ne peut pas être lu. Aucune séance ne peut être planifiée tant que ce n\'est pas corrigé.';
 $string['zoomerr_registration_dropped'] = 'Zoom a accepté l\'enregistrement mais a silencieusement supprimé les paramètres d\'inscription : la séance n\'a PAS été enregistrée comme configurée. Causes connues : l\'hôte n\'a pas de licence Zoom (siège), la séance a été convertie en réunion personnelle (PMI) de l\'hôte, ou un conflit d\'exigences d\'authentification. Corrigez la cause puis enregistrez à nouveau.';
@@ -66,7 +68,6 @@ $string['recording_availability'] = 'Disponibilité';
 // surface. Wording rule (Urs 2026-08-17): Zoom things use Zoom lingo
 // ("occurrence", "réunion") — "séance" is reserved for FormaSuisse course-term
 // sessions (e.g. the spring session of the HRSE GRH course).
-$string['err_plan_no_host'] = 'Aucun hôte du pool n\'est libre pour toutes les occurrences planifiées (± intervalle). Modifiez la date ou l\'heure en conflit — ou le pool a besoin d\'un hôte licencié supplémentaire.';
 $string['err_plandate_duplicate'] = 'Cette date d\'occurrence figure deux fois.';
 $string['event_occurrence_conflict'] = 'Conflit d\'occurrence Zoom détecté';
 $string['firstsession'] = 'Première occurrence';
