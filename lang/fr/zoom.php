@@ -40,6 +40,7 @@ $string['registration_done'] = 'Votre inscription à cette séance est confirmé
 $string['registration_self'] = 'Manuelle — les participant·e·s confirment leur présence par un clic S\'inscrire avant de rejoindre (inscription avec leur nom Moodle)';
 $string['teacher'] = 'Formateur·trice';
 $string['teacher_help'] = 'La personne qui anime cette séance : elle seule voit le bouton Démarrer la réunion. L\'hôte côté Zoom est choisi automatiquement dans le pool d\'hôtes.';
+$string['zoomerr_pool_noregistrationhost'] = 'L\'inscription nécessite un hôte Zoom licencié et le pool n\'en a aucun. Désactivez l\'inscription pour cette réunion, ou ajoutez un hôte licencié au pool.';
 $string['zoomerr_pool_exhausted_slots'] = 'Aucun hôte du pool n\'est libre (± intervalle) pour : {$a}. Modifiez ces dates ou heures — ou le pool a besoin d\'un hôte licencié supplémentaire.';
 $string['zoomerr_pool_exhausted'] = 'Aucun hôte Zoom n\'est disponible pour ce créneau : chaque hôte du pool a une réservation en conflit (y compris l\'intervalle requis entre les séances). Déplacez la séance ou ajoutez un hôte au pool.';
 $string['zoomerr_pool_misconfigured'] = 'Le groupe Zoom du pool d\'hôtes « {$a} » n\'existe pas ou ne peut pas être lu. Aucune séance ne peut être planifiée tant que ce n\'est pas corrigé.';

@@ -2313,6 +2313,13 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
         $members = array_values(array_filter($members, function ($member) {
             return ($member->type ?? ZOOM_USER_TYPE_BASIC) != ZOOM_USER_TYPE_BASIC;
         }));
+        if (empty($members)) {
+            // Without this, the empty pool falls through to the generic
+            // "every host has a conflicting booking" — wrong and unfixable
+            // by moving dates (hit on a Basic-only pool whenever the site
+            // default is registration≠off, local dev 2026-08-18).
+            throw new moodle_exception('zoomerr_pool_noregistrationhost', 'mod_zoom');
+        }
     }
 
     // Teacher stickiness: start scanning at a position derived from the
