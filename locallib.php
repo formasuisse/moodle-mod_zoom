@@ -1493,9 +1493,12 @@ function zoom_pooled_members($context = null) {
  * @param array $slots [start (Unix timestamp), duration (seconds)] pairs.
  * @param ?int $excludemeetingid Meeting ID to ignore (when revalidating an
  *        existing meeting; matches every occurrence of that series).
+ * @param ?array $clashes Out: indexes (into $slots) of every clashing slot —
+ *        what lets the caller say WHICH occurrence blocked the plan.
  * @return bool
  */
-function zoom_pooled_slots_conflict($zoomuserid, array $slots, $excludemeetingid = null) {
+function zoom_pooled_slots_conflict($zoomuserid, array $slots, $excludemeetingid = null, &$clashes = null) {
+    $clashes = [];
     if (empty($slots)) {
         return false;
     }
@@ -1525,14 +1528,14 @@ function zoom_pooled_slots_conflict($zoomuserid, array $slots, $excludemeetingid
 
         $otherstart = strtotime($meeting->start_time);
         $otherend = $otherstart + (($meeting->duration ?? 60) * MINSECS);
-        foreach ($intervals as $interval) {
+        foreach ($intervals as $i => $interval) {
             if ($otherstart < $interval[1] && $otherend > $interval[0]) {
-                return true;
+                $clashes[$i] = $i;
             }
         }
     }
 
-    return false;
+    return !empty($clashes);
 }
 
 /**
@@ -1980,9 +1983,46 @@ function zoom_pooled_planner_context($rows = 30) {
     $defaultdate = date('Y-m-d', $defaultstart);
     $defaulttime = sprintf('%02d:%02d', date('H', $defaultstart), 15 * floor(date('i', $defaultstart) / 15));
 
+    // Validation-error redisplay: refill the rows from the submitted request,
+    // exactly as typed — a form error must not wipe the plan. (The planner
+    // lives in a static element, so formslib's own value repopulation never
+    // sees these inputs.)
+    $submitted = [];
+    $subdates = optional_param_array('zoomplan_date', [], PARAM_RAW_TRIMMED);
+    $subtimes = optional_param_array('zoomplan_time', [], PARAM_RAW_TRIMMED);
+    $subminutes = optional_param_array('zoomplan_minutes', [], PARAM_RAW_TRIMMED);
+    foreach ($subdates as $i => $date) {
+        if (trim($date) !== '') {
+            $submitted[] = [
+                'date' => trim($date),
+                'time' => trim($subtimes[$i] ?? ''),
+                'minutes' => trim($subminutes[$i] ?? ''),
+            ];
+        }
+    }
+
     $rowcontexts = [];
     for ($i = 0; $i < $rows; $i++) {
         $first = ($i === 0);
+        if (!empty($submitted)) {
+            $row = $submitted[$i] ?? null;
+            // 'first' doubles as "visible without JS" — refilled rows must
+            // survive even before mod_zoom/occurrences compacts the planner.
+            $rowcontexts[] = [
+                'index' => $i,
+                'first' => $first || $row !== null,
+                'date' => [
+                    'name' => 'zoomplan_date[]',
+                    'value' => $row['date'] ?? '',
+                    'weekday' => '',
+                    'extraclasses' => 'mr-1',
+                ],
+                'time' => $row['time'] ?? '',
+                'minutes' => $row['minutes'] ?? '',
+            ];
+            continue;
+        }
+
         $rowcontexts[] = [
             'index' => $i,
             'first' => $first,
@@ -2034,9 +2074,18 @@ function zoom_pooled_planner_submitted() {
             continue;
         }
 
+        // An explicit HH:MM is required: a date-only row would parse as
+        // midnight and silently schedule a 00:00 occurrence.
+        $time = trim($times[$i] ?? '');
         $rows[$i] = [
-            'start' => zoom_pooled_parse_local(trim($date) . ' ' . trim($times[$i] ?? '')),
+            'start' => preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)
+                ? zoom_pooled_parse_local(trim($date) . ' ' . $time) : 0,
             'minutes' => (int) ($minutes[$i] ?? 0),
+            // Raw input values, for pointing back at the planner row
+            // (conflict marking matches rows by value, not position — the
+            // client-side sort moves values between row elements).
+            'date' => trim($date),
+            'time' => $time,
         ];
     }
 
@@ -2257,12 +2306,17 @@ function zoom_pooled_occurrence_hide($zoom, $occurrenceid) {
  *
  * @param stdClass $zoom The meeting as built from the form.
  * @param array $slots [start (Unix timestamp), duration (seconds)] pairs;
- *        empty = nothing to check (first member wins).
+ *        empty = nothing to check (first member wins). Extra elements per
+ *        pair are carried through untouched (callers use them to map a
+ *        blocking slot back to its form row).
  * @param ?context $context Module/course context for events.
+ * @param ?array $blocking Out: on pool-exhausted failure, the $slots
+ *        entries no host was free for.
  * @return string The chosen Zoom user ID.
  * @throws moodle_exception When no pool host is free for every slot.
  */
-function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
+function zoom_pooled_pick_host($zoom, array $slots, $context = null, &$blocking = null) {
+    $blocking = [];
     $members = zoom_pooled_members($context);
 
     // Registration is a licensed-host feature (an unlicensed host's
@@ -2273,6 +2327,13 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
         $members = array_values(array_filter($members, function ($member) {
             return ($member->type ?? ZOOM_USER_TYPE_BASIC) != ZOOM_USER_TYPE_BASIC;
         }));
+        if (empty($members)) {
+            // Without this, the empty pool falls through to the generic
+            // "every host has a conflicting booking" — wrong and unfixable
+            // by moving dates (hit on a Basic-only pool whenever the site
+            // default is registration≠off, local dev 2026-08-18).
+            throw new moodle_exception('zoomerr_pool_noregistrationhost', 'mod_zoom');
+        }
     }
 
     // Teacher stickiness: start scanning at a position derived from the
@@ -2286,10 +2347,13 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
 
     $exclude = !empty($zoom->meeting_id) && $zoom->meeting_id != -1 ? $zoom->meeting_id : null;
 
+    $clashsets = [];
     foreach ($members as $member) {
-        if (empty($slots) || !zoom_pooled_slots_conflict($member->id, $slots, $exclude)) {
+        if (empty($slots) || !zoom_pooled_slots_conflict($member->id, $slots, $exclude, $clashes)) {
             return $member->id;
         }
+
+        $clashsets[] = $clashes;
     }
 
     \mod_zoom\event\pool_exhausted::create([
@@ -2300,6 +2364,25 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null) {
             'occurrences' => count($slots),
         ],
     ])->trigger();
+
+    // Say WHICH occurrences blocked the plan: the slots that clashed on
+    // every host are the ones no host choice can fix (when no slot clashes
+    // everywhere, fall back to everything that clashed anywhere).
+    $blockingidx = empty($clashsets) ? [] : array_intersect(...$clashsets);
+    if (empty($blockingidx) && !empty($clashsets)) {
+        $blockingidx = array_unique(array_merge(...$clashsets));
+    }
+    if (!empty($blockingidx)) {
+        sort($blockingidx);
+        $blocking = array_map(function ($i) use ($slots) {
+            return $slots[$i];
+        }, $blockingidx);
+        $dates = array_map(function ($i) use ($slots) {
+            return userdate($slots[$i][0], get_string('strftimedatetimeshort', 'langconfig'));
+        }, $blockingidx);
+        throw new moodle_exception('zoomerr_pool_exhausted_slots', 'mod_zoom', '', implode(', ', $dates));
+    }
+
     throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
 }
 
