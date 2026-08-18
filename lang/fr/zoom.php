@@ -61,3 +61,57 @@ $string['recording_available_until'] = 'Disponible jusqu\'au {$a}';
 $string['recording_expired'] = 'n\'est plus disponible';
 $string['recording_expired_long'] = 'Cet enregistrement n\'est plus disponible : la période de conservation est terminée.';
 $string['recording_availability'] = 'Disponibilité';
+
+// Occurrence-first scheduling (#849): the occurrences table is the schedule
+// surface. Wording rule (Urs 2026-08-17): Zoom things use Zoom lingo
+// ("occurrence", "réunion") — "séance" is reserved for FormaSuisse course-term
+// sessions (e.g. the spring session of the HRSE GRH course).
+$string['err_plan_no_host'] = 'Aucun hôte du pool n\'est libre pour toutes les occurrences planifiées (± intervalle). Modifiez la date ou l\'heure en conflit — ou le pool a besoin d\'un hôte licencié supplémentaire.';
+$string['err_plandate_duplicate'] = 'Cette date d\'occurrence figure deux fois.';
+$string['event_occurrence_conflict'] = 'Conflit d\'occurrence Zoom détecté';
+$string['firstsession'] = 'Première occurrence';
+$string['occ_add'] = 'Ajouter';
+$string['occ_added_notify'] = 'Occurrence ajoutée.';
+$string['occ_cancel'] = 'Annuler';
+$string['occ_cancel_confirm_btn'] = 'Confirmer l\'annulation';
+$string['occ_cancel_confirm'] = 'Annuler l\'occurrence du {$a} ? Elle reste affichée comme annulée afin que les étudiant·e·s voient le changement. Son créneau est libéré sur l\'hôte ; l\'annulation est définitive côté Zoom.';
+$string['occ_cancelled'] = 'Annulée';
+$string['occ_cancelled_notify'] = 'Occurrence annulée.';
+$string['occ_date'] = 'Date';
+$string['occ_duration'] = 'Durée';
+$string['occ_dateformat'] = 'JJ/MM/AAAA';
+$string['occ_discard'] = 'Supprimer';
+$string['occ_discard_confirm_btn'] = 'Confirmer la suppression';
+$string['occ_discard_confirm'] = 'Supprimer l\'occurrence du {$a} ? Elle disparaît complètement de la liste — à utiliser pour les dates qui n\'ont jamais été réellement planifiées. (Pour annuler visiblement une occurrence planifiée, utilisez Annuler.)';
+$string['occ_discarded_notify'] = 'Occurrence supprimée.';
+$string['occ_err_baddate'] = 'Cette date n\'a pas pu être interprétée.';
+$string['occ_err_past'] = 'Les occurrences passées ne peuvent pas être modifiées.';
+$string['occ_moved_notify'] = 'Occurrence déplacée.';
+$string['occ_past'] = 'Passée';
+$string['occ_planner_addrow'] = 'Ajouter une ligne';
+$string['occ_planner_daily'] = '+5j';
+$string['occ_planner_daily_help'] = 'Ajoute 5 occurrences quotidiennes à la suite de cette ligne (jours consécutifs, mêmes heure et durée)';
+$string['occ_planner_monthly'] = '+5m';
+$string['occ_planner_monthly_help'] = 'Ajoute 5 occurrences toutes les 4 semaines à la suite de cette ligne (même jour de semaine, mêmes heure et durée)';
+$string['occ_planner_weekly'] = '+5s';
+$string['occ_planner_weekly_help'] = 'Ajoute 5 occurrences hebdomadaires à la suite de cette ligne (même jour de semaine, mêmes heure et durée)';
+$string['occ_recording'] = 'Enregistrement';
+$string['occ_rec_hide'] = 'Masquer';
+$string['occ_rec_show'] = 'Afficher';
+$string['occ_recording_started'] = 'Enregistrement démarré à {$a}';
+$string['occ_hide'] = 'Retirer de la liste';
+$string['occ_revert'] = 'Rétablir';
+$string['occ_hidden_notify'] = 'Occurrence retirée de la liste.';
+$string['occ_time'] = 'Heure';
+$string['occ_status'] = 'Statut';
+$string['occ_upcoming'] = 'À venir';
+$string['occurrences'] = 'Occurrences';
+$string['occurrencetable'] = 'Afficher le tableau des occurrences';
+$string['occurrencetable_desc'] = 'Mode pool : afficher le tableau des occurrences (dates, enregistrements, actions de gestion) sur la page de la réunion, à la place de la section Planification.';
+$string['plandate'] = 'Occurrence supplémentaire';
+$string['plandatesadd'] = 'Ajouter {no} occurrences';
+$string['plandatesintro'] = 'Planifiez ici toutes les occurrences de cette réunion — elles partagent un seul lien de connexion et une seule liste d\'enregistrements. Un hôte est réservé pour l\'ensemble du plan à l\'enregistrement ; ensuite, les occurrences s\'ajoutent, se déplacent ou s\'annulent une à une dans le tableau des occurrences de la page de la réunion. Laissez une date vide pour ignorer la ligne.';
+$string['schedulemanagedintable'] = 'L\'horaire de cette réunion se gère occurrence par occurrence dans le tableau des occurrences de la <a href="{$a}">page de la réunion</a>.';
+$string['zoomerr_last_occurrence'] = 'La dernière occurrence restante ne peut pas être annulée — supprimez plutôt l\'activité.';
+$string['zoomerr_occurrence_limit'] = 'Cette réunion a atteint le nombre maximal d\'occurrences (60, occurrences annulées comprises). Créez une nouvelle activité pour les occurrences suivantes.';
+$string['zoomerr_pool_nousable'] = 'Le groupe Zoom du pool d\'hôtes « {$a} » n\'a aucun membre utilisable : il est vide, ou aucun de ses membres n\'a de licence alors que seuls les hôtes licenciés peuvent animer (zoom | pooledrequirelicense). Aucune occurrence ne peut être planifiée tant que ce n\'est pas corrigé.';

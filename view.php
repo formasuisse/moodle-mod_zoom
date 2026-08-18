@@ -249,9 +249,33 @@ if (!$showrecreate) {
         $link = html_writer::tag('div', $unavailabilitynote, ['class' => 'alert alert-primary']);
     }
 
-    echo $OUTPUT->box_start('generalbox text-center');
+    // Center the primary action (Join button); the unavailability notice
+    // reads left-aligned like the rest of the page (occurrences table etc.).
+    echo $OUTPUT->box_start('generalbox' . ($available ? ' text-center' : ''));
     echo $link;
     echo $OUTPUT->box_end();
+}
+
+// Pooled-hosts feature (occurrence-first scheduling): the occurrence table
+// is the schedule surface — one row per session, inline video recordings,
+// manager add/move/cancel. When it renders, the Schedule box is redundant
+// and suppressed.
+// Default ON while the setting is still unset (settings defaults only land
+// when the admin upgrade step runs — see the #835 deploy-skip history).
+$occurrencetableenabled = get_config('zoom', 'occurrencetable');
+if (zoom_pooled_group() !== null && empty($zoom->webinar)
+        && ($occurrencetableenabled === false || $occurrencetableenabled)) {
+    // Management UI only in edit mode: outside "Mode d'édition" managers
+    // see exactly the student rendering (plain dates, student-visible
+    // recordings only, no actions).
+    $occurrencecontext = zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager && $PAGE->user_is_editing());
+    if ($occurrencecontext !== null) {
+        if ($occurrencecontext['canedit']) {
+            $PAGE->requires->js_call_amd('mod_zoom/occurrences', 'init');
+        }
+
+        echo $OUTPUT->render_from_template('mod_zoom/pooled_occurrence_table', $occurrencecontext);
+    }
 }
 
 if ($zoom->show_schedule) {

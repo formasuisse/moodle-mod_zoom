@@ -134,13 +134,45 @@ Enable by setting `zoom/pooledhostsgroup`; leave empty for stock behavior.
 
 How it works:
 
-- **Scheduling**: the activity form gains a required Teacher selector (role
-  archetypes per `pooledteacherroles`). On save, the plugin picks a pool
-  member whose Zoom calendar (including meetings scheduled outside Moodle) is
-  free for the slot ± buffer; the scan starts at a position hashed from the
+- **Scheduling (occurrence-first)**: the activity form gains a required
+  Teacher selector (role archetypes per `pooledteacherroles`) and replaces
+  the recurrence-rule UI entirely: a meeting is planned **date by date**
+  (first session + a planned-dates repeater), every session sharing one
+  meeting id — one join link, one recordings archive, one registration set.
+  On save, the plugin picks a pool member whose Zoom calendar (including
+  meetings scheduled outside Moodle; the listing is per-occurrence and
+  occurrence-edit-aware — measured) is free for **every** planned slot ±
+  buffer (batch placement — a later host change would mean a new meeting id,
+  so it must never be needed); the scan starts at a position hashed from the
   teacher so the same teacher tends to stay on the same pool host. No free
   host = the save fails (`pool_exhausted`) — that is the capacity signal.
-  Duration is mandatory for scheduled meetings in pooled mode.
+  Under the hood the meeting is a type-8 recurring series on a hidden
+  scaffold rule (weekly, `end_times` = session count — a container format,
+  never user-visible or user-editable), and each grid occurrence is moved
+  onto its planned date after create. Duration is mandatory in pooled mode.
+- **Managing the schedule**: after creation the settings form carries no
+  schedule fields — the **occurrence table** on the activity page (setting
+  `zoom/occurrencetable`, default on; replaces the Schedule box) is the
+  single scheduling surface: one row per session with status and inline
+  video recordings (audio-only files are not listed; the existing
+  per-recording visibility toggle applies), plus manager actions. Add =
+  `end_times`+1 (grid-compatible, preserves every occurrence edit —
+  measured) followed by a move onto the target date (hard cap 60 sessions:
+  above that Zoom silently collapses the series). Move = per-occurrence
+  PATCH. Cancel = per-occurrence DELETE (a permanent tombstone on Zoom —
+  measured — that frees the host's slot; the last active session cannot be
+  cancelled). Every action is conflict-checked against the meeting's host
+  first and followed by an immediate readback that refreshes the record, the
+  `zoom_occurrences` store (key: Zoom's `occurrence_id` = grid-slot epoch,
+  stable across moves) and the calendar events.
+- **Out-of-band edits**: occurrence-level portal edits (cancel/move) are
+  tolerated — the daily `update_meetings` sync imports them into the store
+  and calendar, and now also **retroactively conflict-checks** future
+  occurrences against the host's calendar (`occurrence_conflict` event on
+  collision — Zoom itself never conflict-checks, so the sync is the only
+  detector for portal-made double-bookings). Structural portal edits
+  (converting a meeting to recurring, changing the rule) are clobbered by
+  the next Moodle save — don't.
 - **Starting**: only the selected teacher sees Start. The click live-checks
   the pool host (`collision_imminent` if it is still in another meeting —
   Zoom allows only one active meeting per host and ends the first when a
