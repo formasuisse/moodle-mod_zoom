@@ -87,8 +87,8 @@
                     }
                 ],
                 "cancelurl": "https://example.com/mod/zoom/occurrence.php?id=3&action=cancel",
-                "deleteurl": "https://example.com/mod/zoom/occurrence.php?id=3&action=delete",
-                "removeurl": null
+                "discardurl": "https://example.com/mod/zoom/occurrence.php?id=3&action=discard",
+                "hideurl": null
             }
         ],
         "addform": {
@@ -176,10 +176,10 @@
                                 <button type="button" data-zoom-occ-revert="1" class="btn btn-link btn-sm zoom-occ-edit d-none">{{#str}} occ_revert, mod_zoom {{/str}}</button>
                             </form>
                             <a href="{{cancelurl}}">{{#str}} occ_cancel, mod_zoom {{/str}}</a> |
-                            <a href="{{deleteurl}}">{{#str}} occ_delete, mod_zoom {{/str}}</a>
+                            <a href="{{discardurl}}">{{#str}} occ_discard, mod_zoom {{/str}}</a>
                         {{/editable}}
                         {{! Cancellation artifact cleanup: hide it from the list. }}
-                        {{#removeurl}}<a href="{{removeurl}}">{{#str}} occ_remove, mod_zoom {{/str}}</a>{{/removeurl}}
+                        {{#hideurl}}<a href="{{hideurl}}">{{#str}} occ_hide, mod_zoom {{/str}}</a>{{/hideurl}}
                     </div>
                 </td>
                 {{/ismanager}}

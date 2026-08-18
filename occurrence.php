@@ -23,12 +23,12 @@
  *         onto the requested slot (Zoom has no add-occurrence API; both
  *         steps are measured-safe — see README, 'Pooled hosts mode').
  * move:   PATCH the occurrence onto a new date/duration.
- * cancel: DELETE the occurrence — stays listed, struck through (it was
- *         planned; students should see the change). Confirm page.
- * delete: DELETE the occurrence AND hide it from the table (it was never
- *         really planned — scaffold surplus). Confirm page.
- * remove: hide an already-cancelled occurrence (artifact cleanup;
- *         Moodle-only, the Zoom tombstone is untouchable either way).
+ * cancel:  strike the occurrence on Zoom — stays listed, struck through
+ *          (it was planned; students should see the change). Confirm page.
+ * discard: strike on Zoom AND hide from the table (it was never really
+ *          planned — scaffold surplus). Confirm page.
+ * hide:    hide an already-cancelled occurrence (artifact cleanup;
+ *          Moodle-only, the Zoom tombstone is untouchable either way).
  *
  * Every Zoom mutation is conflict-checked against the meeting's (fixed)
  * pool host first and followed by an immediate readback that refreshes the
@@ -129,7 +129,7 @@ function mod_zoom_occurrence_load($zoom, $occurrenceid, $needstatus, $viewurl) {
  *
  * @param stdClass $cm Course module.
  * @param moodle_url $viewurl Back target.
- * @param string $action 'cancel' or 'delete' (round-trips in the confirm URL).
+ * @param string $action 'cancel' or 'discard' (round-trips in the confirm URL).
  * @param stdClass $occurrence The occurrence at stake (date shown in the prompt).
  * @param string $confirmstring mod_zoom string id of the prompt.
  * @param string $buttonstring mod_zoom string id of the confirm button label.
@@ -186,11 +186,11 @@ try {
             redirect($viewurl, get_string('occ_moved_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
 
-        case 'remove':
+        case 'hide':
             require_sesskey();
             mod_zoom_occurrence_load($zoom, $occurrenceid, 'deleted', $viewurl);
-            zoom_pooled_occurrence_remove($zoom, $occurrenceid);
-            redirect($viewurl, get_string('occ_removed_notify', 'mod_zoom'), null,
+            zoom_pooled_occurrence_hide($zoom, $occurrenceid);
+            redirect($viewurl, get_string('occ_hidden_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
 
         case 'recshow':
@@ -214,13 +214,13 @@ try {
             redirect($viewurl, get_string('occ_cancelled_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
 
-        case 'delete':
-            // Delete: struck on Zoom AND hidden from the list right away.
+        case 'discard':
+            // Discard: struck on Zoom AND hidden from the list right away.
             $occurrence = mod_zoom_occurrence_load($zoom, $occurrenceid, 'available', $viewurl);
-            mod_zoom_occurrence_require_confirm($cm, $viewurl, 'delete', $occurrence,
-                'occ_delete_confirm', 'occ_delete_confirm_btn');
+            mod_zoom_occurrence_require_confirm($cm, $viewurl, 'discard', $occurrence,
+                'occ_discard_confirm', 'occ_discard_confirm_btn');
             zoom_pooled_occurrence_cancel($zoom, $occurrenceid, true);
-            redirect($viewurl, get_string('occ_deleted_notify', 'mod_zoom'), null,
+            redirect($viewurl, get_string('occ_discarded_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
 
         default:

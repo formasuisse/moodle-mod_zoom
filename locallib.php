@@ -1821,10 +1821,10 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
             'slot' => $editable ? zoom_pooled_slot_context((int) $row->starttime, $formid, true) : null,
             'recordings' => $recordings,
             'cancelurl' => $editable ? $occurrenceurl(['action' => 'cancel', 'occurrence' => $row->occurrenceid]) : null,
-            'deleteurl' => $editable ? $occurrenceurl(['action' => 'delete', 'occurrence' => $row->occurrenceid]) : null,
+            'discardurl' => $editable ? $occurrenceurl(['action' => 'discard', 'occurrence' => $row->occurrenceid]) : null,
             // Cancellation artifact cleanup: hide it from the list.
-            'removeurl' => ($canedit && $cancelled && $row->occurrenceid !== '') ? $occurrenceurl([
-                'action' => 'remove', 'occurrence' => $row->occurrenceid, 'sesskey' => sesskey(),
+            'hideurl' => ($canedit && $cancelled && $row->occurrenceid !== '') ? $occurrenceurl([
+                'action' => 'hide', 'occurrence' => $row->occurrenceid, 'sesskey' => sesskey(),
             ]) : null,
         ];
     }
@@ -2187,25 +2187,25 @@ function zoom_pooled_occurrence_move($zoom, $occurrenceid, $start, $duration) {
 }
 
 /**
- * Cancel (or fully delete) an occurrence of a pooled series.
+ * Cancel (or discard: cancel + hide) an occurrence of a pooled series.
  *
- * Deletion is a permanent tombstone on Zoom (measured 2026-08-16): it
+ * The strike is a permanent tombstone on Zoom (measured 2026-08-16): it
  * survives any later meeting PATCH and frees the host's slot. Moodle-side
  * the tombstone has two flavors: a CANCELLED session stays visible in the
  * table (struck through — it was planned, students should see the change),
- * a DELETED one is hidden entirely (it was never really planned — e.g. a
+ * a DISCARDED one is hidden entirely (it was never really planned — e.g. a
  * scaffold surplus). The last remaining active occurrence cannot be
  * cancelled — delete the activity instead (Zoom may drop the whole meeting
  * with its final occurrence).
  *
  * @param stdClass $zoom zoom record.
  * @param string $occurrenceid Zoom occurrence_id.
- * @param bool $remove True = hide from the table too ('removed'), false =
+ * @param bool $hide True = hide from the table too ('removed'), false =
  *        show as cancelled ('deleted').
  * @return void
  * @throws moodle_exception zoomerr_last_occurrence when it is the last one.
  */
-function zoom_pooled_occurrence_cancel($zoom, $occurrenceid, $remove = false) {
+function zoom_pooled_occurrence_cancel($zoom, $occurrenceid, $hide = false) {
     global $DB;
 
     $active = $DB->count_records('zoom_occurrences', ['zoomid' => $zoom->id, 'status' => 'available']);
@@ -2215,13 +2215,13 @@ function zoom_pooled_occurrence_cancel($zoom, $occurrenceid, $remove = false) {
 
     zoom_webservice()->delete_meeting_occurrence($zoom, $occurrenceid);
     zoom_pooled_refresh_from_zoom($zoom);
-    if ($remove) {
-        zoom_pooled_occurrence_remove($zoom, $occurrenceid);
+    if ($hide) {
+        zoom_pooled_occurrence_hide($zoom, $occurrenceid);
     }
 }
 
 /**
- * Hide a cancelled occurrence from the sessions table ('removed').
+ * Hide a cancelled occurrence from the sessions table (stored as 'removed').
  *
  * Moodle-only operation — the Zoom tombstone is untouchable either way.
  * Used directly to clean up cancellation artifacts (occurrences struck
@@ -2232,7 +2232,7 @@ function zoom_pooled_occurrence_cancel($zoom, $occurrenceid, $remove = false) {
  * @param string $occurrenceid Zoom occurrence_id.
  * @return void
  */
-function zoom_pooled_occurrence_remove($zoom, $occurrenceid) {
+function zoom_pooled_occurrence_hide($zoom, $occurrenceid) {
     global $DB;
 
     $row = $DB->get_record('zoom_occurrences', ['zoomid' => $zoom->id, 'occurrenceid' => $occurrenceid], '*', MUST_EXIST);
