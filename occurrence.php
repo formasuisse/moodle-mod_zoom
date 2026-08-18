@@ -91,21 +91,78 @@ function mod_zoom_occurrence_slot_params($viewurl) {
     return [$start, $minutes * 60];
 }
 
-$occurrence = null;
-if ($action !== 'add' && $action !== 'recshow') {
+/**
+ * Load the occurrence an action operates on, enforcing its required state.
+ *
+ * @param stdClass $zoom zoom record.
+ * @param string $occurrenceid Zoom occurrence id from the request.
+ * @param string $needstatus Stored status the action expects: 'available'
+ *        (schedulable — must also lie in the future; past sessions are
+ *        history) or 'deleted' (a cancelled row).
+ * @param moodle_url $viewurl Where to bounce when the state does not match.
+ * @return stdClass zoom_occurrences row.
+ */
+function mod_zoom_occurrence_load($zoom, $occurrenceid, $needstatus, $viewurl) {
+    global $DB;
+
     $occurrence = $DB->get_record('zoom_occurrences', [
         'zoomid' => $zoom->id,
         'occurrenceid' => $occurrenceid,
     ], '*', MUST_EXIST);
-    $needstatus = ($action === 'remove') ? 'deleted' : 'available';
     if ($occurrence->status !== $needstatus) {
         redirect($viewurl);
     }
 
-    if ($action !== 'remove' && $occurrence->starttime < time()) {
-        // Past sessions are history — nothing to schedule.
+    if ($needstatus === 'available' && $occurrence->starttime < time()) {
         redirect($viewurl, get_string('occ_err_past', 'mod_zoom'), null, \core\output\notification::NOTIFY_ERROR);
     }
+
+    return $occurrence;
+}
+
+/**
+ * Require the user's confirmation for a destructive occurrence action.
+ *
+ * Passes through when the request already carries the confirm flag (with a
+ * valid sesskey); otherwise renders the are-you-sure page and ends the
+ * request.
+ *
+ * @param stdClass $cm Course module.
+ * @param moodle_url $viewurl Back target.
+ * @param string $action 'cancel' or 'delete' (round-trips in the confirm URL).
+ * @param stdClass $occurrence The occurrence at stake (date shown in the prompt).
+ * @param string $confirmstring mod_zoom string id of the prompt.
+ * @param string $buttonstring mod_zoom string id of the confirm button label.
+ * @return void
+ */
+function mod_zoom_occurrence_require_confirm($cm, $viewurl, $action, $occurrence, $confirmstring, $buttonstring) {
+    global $OUTPUT;
+
+    if (optional_param('confirm', 0, PARAM_INT) && confirm_sesskey()) {
+        return;
+    }
+
+    echo $OUTPUT->header();
+    $confirmurl = new moodle_url('/mod/zoom/occurrence.php', [
+        'id' => $cm->id, 'action' => $action, 'occurrence' => $occurrence->occurrenceid,
+        'confirm' => 1, 'sesskey' => sesskey(),
+    ]);
+    // Explicit button labels: the generic Annuler/Continuer pair is
+    // hopeless under a message that itself starts with "Annuler …?".
+    $confirmbutton = new single_button(
+        $confirmurl,
+        get_string($buttonstring, 'mod_zoom'),
+        'post',
+        single_button::BUTTON_DANGER
+    );
+    $backbutton = new single_button($viewurl, get_string('back'), 'get');
+    echo $OUTPUT->confirm(
+        get_string($confirmstring, 'mod_zoom', userdate($occurrence->starttime)),
+        $confirmbutton,
+        $backbutton
+    );
+    echo $OUTPUT->footer();
+    die();
 }
 
 $PAGE->set_url('/mod/zoom/occurrence.php', ['id' => $cm->id, 'action' => $action, 'occurrence' => $occurrenceid]);
@@ -123,6 +180,7 @@ try {
 
         case 'move':
             require_sesskey();
+            mod_zoom_occurrence_load($zoom, $occurrenceid, 'available', $viewurl);
             [$start, $duration] = mod_zoom_occurrence_slot_params($viewurl);
             zoom_pooled_occurrence_move($zoom, $occurrenceid, $start, $duration);
             redirect($viewurl, get_string('occ_moved_notify', 'mod_zoom'), null,
@@ -130,6 +188,7 @@ try {
 
         case 'remove':
             require_sesskey();
+            mod_zoom_occurrence_load($zoom, $occurrenceid, 'deleted', $viewurl);
             zoom_pooled_occurrence_remove($zoom, $occurrenceid);
             redirect($viewurl, get_string('occ_removed_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
@@ -147,39 +206,22 @@ try {
             redirect($viewurl);
 
         case 'cancel':
-        case 'delete':
-            if (optional_param('confirm', 0, PARAM_INT) && confirm_sesskey()) {
-                zoom_pooled_occurrence_cancel($zoom, $occurrenceid, $action === 'delete');
-                redirect(
-                    $viewurl,
-                    get_string($action === 'delete' ? 'occ_deleted_notify' : 'occ_cancelled_notify', 'mod_zoom'),
-                    null,
-                    \core\output\notification::NOTIFY_SUCCESS
-                );
-            }
+            // Cancel: the occurrence is struck on Zoom but stays listed.
+            $occurrence = mod_zoom_occurrence_load($zoom, $occurrenceid, 'available', $viewurl);
+            mod_zoom_occurrence_require_confirm($cm, $viewurl, 'cancel', $occurrence,
+                'occ_cancel_confirm', 'occ_cancel_confirm_btn');
+            zoom_pooled_occurrence_cancel($zoom, $occurrenceid, false);
+            redirect($viewurl, get_string('occ_cancelled_notify', 'mod_zoom'), null,
+                \core\output\notification::NOTIFY_SUCCESS);
 
-            echo $OUTPUT->header();
-            $confirmurl = new moodle_url('/mod/zoom/occurrence.php', [
-                'id' => $cm->id, 'action' => $action, 'occurrence' => $occurrenceid,
-                'confirm' => 1, 'sesskey' => sesskey(),
-            ]);
-            $confirmstring = $action === 'delete' ? 'occ_delete_confirm' : 'occ_cancel_confirm';
-            // Explicit button labels: the generic Annuler/Continuer pair is
-            // hopeless under a message that itself starts with "Annuler …?".
-            $confirmbutton = new single_button(
-                $confirmurl,
-                get_string($action === 'delete' ? 'occ_delete_confirm_btn' : 'occ_cancel_confirm_btn', 'mod_zoom'),
-                'post',
-                single_button::BUTTON_DANGER
-            );
-            $backbutton = new single_button($viewurl, get_string('back'), 'get');
-            echo $OUTPUT->confirm(
-                get_string($confirmstring, 'mod_zoom', userdate($occurrence->starttime)),
-                $confirmbutton,
-                $backbutton
-            );
-            echo $OUTPUT->footer();
-            die();
+        case 'delete':
+            // Delete: struck on Zoom AND hidden from the list right away.
+            $occurrence = mod_zoom_occurrence_load($zoom, $occurrenceid, 'available', $viewurl);
+            mod_zoom_occurrence_require_confirm($cm, $viewurl, 'delete', $occurrence,
+                'occ_delete_confirm', 'occ_delete_confirm_btn');
+            zoom_pooled_occurrence_cancel($zoom, $occurrenceid, true);
+            redirect($viewurl, get_string('occ_deleted_notify', 'mod_zoom'), null,
+                \core\output\notification::NOTIFY_SUCCESS);
 
         default:
             redirect($viewurl);
