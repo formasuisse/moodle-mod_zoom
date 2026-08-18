@@ -2074,8 +2074,12 @@ function zoom_pooled_planner_submitted() {
             continue;
         }
 
+        // An explicit HH:MM is required: a date-only row would parse as
+        // midnight and silently schedule a 00:00 occurrence.
+        $time = trim($times[$i] ?? '');
         $rows[$i] = [
-            'start' => zoom_pooled_parse_local(trim($date) . ' ' . trim($times[$i] ?? '')),
+            'start' => preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $time)
+                ? zoom_pooled_parse_local(trim($date) . ' ' . $time) : 0,
             'minutes' => (int) ($minutes[$i] ?? 0),
         ];
     }

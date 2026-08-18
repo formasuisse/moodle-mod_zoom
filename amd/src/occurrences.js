@@ -234,9 +234,11 @@ define([], function() {
                         });
                     });
                 };
+                // Compact only when a DATE settles: compacting on time
+                // changes wiped a time typed into a not-yet-dated row (the
+                // row counts as unfilled and gets cleared, 2026-08-18).
                 rows.forEach(function(row) {
                     fieldOf(row, 'date').addEventListener('change', compact);
-                    fieldOf(row, 'time').addEventListener('change', compact);
                     var clear = row.querySelector('[data-zoom-occ-clearrow]');
                     if (clear) {
                         clear.addEventListener('click', function(e) {
