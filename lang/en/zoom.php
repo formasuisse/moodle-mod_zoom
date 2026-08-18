@@ -219,7 +219,6 @@ $string['event_pool_exhausted'] = 'Zoom host pool exhausted';
 $string['event_occurrence_conflict'] = 'Zoom occurrence conflict detected';
 $string['event_pool_misconfigured'] = 'Zoom host pool misconfigured';
 $string['event_registration_dropped'] = 'Zoom registration settings dropped';
-$string['err_plan_no_host'] = 'No pool host is free for every planned session (± buffer). Change the colliding date or time — or the pool needs another licensed host.';
 $string['err_plandate_duplicate'] = 'This session date is listed twice.';
 $string['firstsession'] = 'First occurrence';
 $string['occ_add'] = 'Add';
@@ -537,6 +536,7 @@ $string['registration_done'] = 'You are registered for this session. The join bu
 $string['registration_self'] = 'Manual — participants confirm their attendance with a Register click before joining (registered with their Moodle name)';
 $string['zoomerr_registration_dropped'] = 'Zoom accepted the save but silently dropped the registration settings, so the meeting was NOT saved as configured. Known causes: the host has no Zoom license (seat), the meeting was converted to the host\'s Personal Meeting ID (use_pmi_for_scheduled_meetings), or authentication requirements conflict. Fix the cause and save again.';
 $string['zoomerr_scopes'] = 'The Zoom OAuth configuration is missing these required scopes: {$a}';
+$string['zoomerr_pool_exhausted_slots'] = 'No pool host is free (± buffer) for: {$a}. Change those dates or times — or the pool needs another licensed host.';
 $string['zoomerr_pool_exhausted'] = 'No Zoom host is available for this time slot: every pooled host has a conflicting booking (including the required gap between sessions). Move the session, or add a host to the pool.';
 $string['zoomerr_pool_misconfigured'] = 'The configured Zoom host-pool group "{$a}" does not exist or cannot be read. Sessions cannot be scheduled until this is fixed.';
 $string['zoomerr_usernotfound'] = 'Unable to find your account on Zoom. If you are using Zoom for the first time, you must activate your Zoom account by logging into <a href="{$a}" target="_blank">{$a}</a>. Once you\'ve activated your Zoom account, reload this page and continue setting up your meeting. Else make sure your email on Zoom matches your email on this system.';

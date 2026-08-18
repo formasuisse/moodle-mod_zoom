@@ -1298,7 +1298,10 @@ class mod_zoom_mod_form extends moodleform_mod {
                             'teacherid' => $data['teacherid'] ?? null,
                         ], $slots, $this->context);
                     } catch (moodle_exception $e) {
-                        $errors['plandatesplanner'] = get_string('err_plan_no_host', 'mod_zoom');
+                        // The message already says which occurrence(s)
+                        // clashed (zoomerr_pool_exhausted_slots) or what is
+                        // misconfigured (zoomerr_pool_nousable).
+                        $errors['plandatesplanner'] = $e->getMessage();
                     }
                 }
             }
