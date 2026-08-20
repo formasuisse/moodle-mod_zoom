@@ -911,9 +911,6 @@ class webservice {
      * @return \mod_zoom\invitation The meeting's invitation.
      */
     public function get_meeting_invitation($zoom) {
-        global $CFG;
-        require_once($CFG->dirroot . '/mod/zoom/classes/invitation.php');
-
         // Webinar does not have meeting invite info.
         if ($zoom->webinar) {
             return new invitation(null);

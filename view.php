@@ -591,7 +591,7 @@ if ($zoom->show_media) {
         $meetinginvite = zoom_webservice()->get_meeting_invitation($zoom)->get_display_string($cm->id);
         // Show meeting invitation if there is any.
         if (!empty($meetinginvite)) {
-            $meetinginvitetext = str_replace("\r\n", '<br/>', s($meetinginvite));
+            $meetinginvitetext = nl2br(s($meetinginvite));
             $showbutton = html_writer::tag(
                 'button',
                 $strmeetinginviteshow,
