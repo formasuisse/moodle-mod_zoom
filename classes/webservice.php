@@ -218,6 +218,11 @@ class webservice {
         // Create $curl, which implicitly uses the proxy settings from $CFG.
         $curl = new curl();
 
+        // Verify the peer certificate to mitigate MITM attacks.
+        $curl->setopt([
+            'CURLOPT_SSL_VERIFYPEER' => true,
+        ]);
+
         if (!empty($proxyhost)) {
             // Restore the stored global proxy settings from above.
             $CFG->proxyhost = $cfg->proxyhost;
