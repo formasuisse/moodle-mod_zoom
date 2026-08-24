@@ -552,15 +552,6 @@ if ($hassiteconfig && $ADMIN->fulltree) {
     ));
 
     $settings->add(new admin_setting_configcheckbox(
-        'zoom/invitationregexenabled',
-        new lang_string('invitationregexenabled', 'mod_zoom'),
-        new lang_string('invitationregexenabled_help', 'mod_zoom'),
-        0,
-        1,
-        0
-    ));
-
-    $settings->add(new admin_setting_configcheckbox(
         'zoom/invitationremoveinvite',
         new lang_string('invitationremoveinvite', 'mod_zoom'),
         new lang_string('invitationremoveinvite_help', 'mod_zoom'),
@@ -568,7 +559,6 @@ if ($hassiteconfig && $ADMIN->fulltree) {
         1,
         0
     ));
-    $settings->hide_if('zoom/invitationremoveinvite', 'zoom/invitationregexenabled', 'eq', 0);
 
     $settings->add(new admin_setting_configcheckbox(
         'zoom/invitationremoveicallink',
@@ -578,7 +568,6 @@ if ($hassiteconfig && $ADMIN->fulltree) {
         1,
         0
     ));
-    $settings->hide_if('zoom/invitationremoveicallink', 'zoom/invitationregexenabled', 'eq', 0);
 
     // Allow admin to modify regex for invitation parts if zoom api changes.
     foreach (invitation::get_default_invitation_regex() as $element => $pattern) {
@@ -588,12 +577,6 @@ if ($hassiteconfig && $ADMIN->fulltree) {
             new lang_string(invitation::PREFIX . $element . '_help', 'mod_zoom'),
             $pattern
         ));
-        $settings->hide_if(
-            'zoom/' . invitation::PREFIX . $element,
-            'zoom/invitationregexenabled',
-            'eq',
-            0
-        );
     }
 
     // Extra hideif for elements which can be enabled / disabled individually.
