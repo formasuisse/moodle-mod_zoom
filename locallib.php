@@ -1320,6 +1320,49 @@ function zoom_get_meeting_recordings_grouped($zoomid = null) {
 }
 
 /**
+ * Make Zoom's sharing flag for a recording set match Moodle's visibility.
+ *
+ * Zoom creates every cloud recording set unshared (share_recording "none"),
+ * which only the host and account admins can open, so a student following
+ * the play link gets a permission error until the set is shared. Sharing is
+ * per recording SET (per meetinguuid) while Moodle stores visibility per
+ * row, so the set is shared as soon as one of its rows is visible and
+ * unshared once the last one is hidden. Hiding therefore revokes a link a
+ * student already holds, instead of only dropping it from the list.
+ *
+ * Purged rows are ignored: retention has already moved those recordings to
+ * the Zoom trash, so there is nothing left to share, and a set with no rows
+ * still on Zoom is left alone rather than patched into a 404.
+ *
+ * @param string $meetinguuid The UUID of a meeting with recordings.
+ * @param \mod_zoom\webservice|null $service The service to call, for testing.
+ * @return bool Whether Zoom now matches Moodle.
+ */
+function zoom_recording_sharing_sync($meetinguuid, $service = null) {
+    global $DB;
+
+    $params = ['meetinguuid' => $meetinguuid];
+    $onzoom = 'meetinguuid = :meetinguuid AND (timepurged IS NULL OR timepurged = 0)';
+
+    if (!$DB->record_exists_select('zoom_meeting_recordings', $onzoom, $params)) {
+        // Nothing of this set is left on Zoom.
+        return true;
+    }
+
+    $shared = $DB->record_exists_select('zoom_meeting_recordings', $onzoom . ' AND showrecording = 1', $params);
+
+    try {
+        $service = $service ?? zoom_webservice();
+        $service->set_recording_sharing($meetinguuid, $shared);
+    } catch (moodle_exception $error) {
+        debugging('Could not set Zoom sharing for recording set ' . $meetinguuid . ': ' . $error->getMessage());
+        return false;
+    }
+
+    return true;
+}
+
+/**
  * Singleton for Zoom webservice class.
  *
  * @return \mod_zoom\webservice

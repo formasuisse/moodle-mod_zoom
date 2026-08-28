@@ -99,6 +99,7 @@ $string['occ_planner_weekly_help'] = 'Ajoute 5 occurrences hebdomadaires à la s
 $string['occ_recording'] = 'Enregistrement';
 $string['occ_rec_hide'] = 'Masquer';
 $string['occ_rec_show'] = 'Afficher';
+$string['recordingsharingfailed'] = 'La visibilité de l\'enregistrement a été enregistrée, mais Zoom n\'a pas pu être mis à jour : les participant·e·s ne peuvent peut-être pas encore le lire. Réessayez.';
 $string['occ_recording_started'] = 'Enregistrement démarré à {$a}';
 $string['occ_hide'] = 'Retirer de la liste';
 $string['occ_revert'] = 'Rétablir';

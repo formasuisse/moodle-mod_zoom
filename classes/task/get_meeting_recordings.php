@@ -117,6 +117,7 @@ class get_meeting_recordings extends scheduled_task {
         }
 
         $meetingdata = [];
+        $touchedsets = [];
         $localrecordings = zoom_get_meeting_recordings_grouped();
 
         foreach ($hostmeetings as $hostid => $meetings) {
@@ -187,7 +188,18 @@ class get_meeting_recordings extends scheduled_task {
                 $record->timemodified = $now;
 
                 $record->id = $DB->insert_record('zoom_meeting_recordings', $record);
+                $touchedsets[$recording->meetinguuid] = true;
                 mtrace('Recording id: ' . $recordingid . ' (' . $recordingtype . ') added to the database');
+            }
+        }
+
+        // New rows land at recordings_visible_default, which defaults to
+        // visible — and a recording set Zoom created stays unshared until it
+        // is told otherwise, so the common path (nobody touches the toggle)
+        // needs this to be watchable at all.
+        foreach (array_keys($touchedsets) as $meetinguuid) {
+            if (!zoom_recording_sharing_sync($meetinguuid, $service)) {
+                mtrace('Could not update Zoom sharing for recording set: ' . $meetinguuid);
             }
         }
     }

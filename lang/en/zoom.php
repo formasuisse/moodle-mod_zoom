@@ -390,6 +390,7 @@ $string['recordingnotfound'] = 'Recording could not be found';
 $string['recordingnotvisible'] = 'Recording is not visible. Please contact your System Administrator if you believe this is an error';
 $string['recordingpasscode'] = 'Recording Passcode';
 $string['recordings'] = 'Recordings';
+$string['recordingsharingfailed'] = 'The recording visibility was saved, but Zoom could not be updated, so students may not be able to play it yet. Try the toggle again.';
 $string['recordingshow'] = 'Show Recording (Currently Hidden)';
 $string['recordingshowtoggle'] = 'Toggle Show Recording';
 $string['recordingtype_active_speaker'] = 'Active Speaker';

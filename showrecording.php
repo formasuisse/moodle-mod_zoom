@@ -64,12 +64,22 @@ if (empty($recordings)) {
 $now = time();
 
 // Toggle the showrecording value.
+$sharingsynced = true;
 if ($showrecording === 1 || $showrecording === 0) {
     foreach ($recordings as $rec) {
         $rec->showrecording = $showrecording;
         $rec->timemodified = $now;
         $DB->update_record('zoom_meeting_recordings', $rec);
     }
+
+    // Visibility in Moodle is what grants access on Zoom: without this the
+    // recording stays unshared and only admins can play it.
+    $sharingsynced = zoom_recording_sharing_sync($meetinguuid);
+}
+
+if (!$sharingsynced) {
+    redirect($url, get_string('recordingsharingfailed', 'mod_zoom'), null,
+        \core\output\notification::NOTIFY_WARNING);
 }
 
 redirect($url);
