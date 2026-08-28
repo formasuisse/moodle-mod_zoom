@@ -2473,8 +2473,22 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null, &$blocking 
  * of their own — that is the entire premise of the pool — so asking for one
  * (zoom_get_user_id(), which throws zoomerr_usernotfound) made the banner's
  * own escape hatch unreachable on every pooled site. The host comes from the
- * pool instead, picked by the same rules as on create and conflict-checked
- * against the sessions the recreated series still owes.
+ * pool instead, picked by the same rules as on create.
+ *
+ * The pick is conflict-checked against the store's future occurrences, which
+ * is an APPROXIMATION on purpose. Recreate rebuilds the schedule from the
+ * stored recurrence RULE (database_to_api), while the store reflects Zoom's
+ * actual occurrences including moves and cancellations, so the two diverge
+ * once a series has been edited. Expanding the rule locally to get exact
+ * dates is the one thing this code never does — Zoom owns grid expansion.
+ * The approximation is exact in the case that matters (a live series deleted
+ * out of band, its grid untouched) and elsewhere buys the right days, which
+ * is enough to stop a replacement landing on a host that is already busy.
+ *
+ * A series whose dates are all past owes nothing, so the slot list is empty:
+ * the conflict check short-circuits, no Zoom calendar call is made, and any
+ * pool member can take it. That is the normal case behind the not-found
+ * banner — the series simply ended.
  *
  * Outside pooled mode the recreating user's own account owns the new
  * meeting: the former owner may no longer exist on Zoom, which is a common
