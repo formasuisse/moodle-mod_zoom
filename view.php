@@ -139,7 +139,16 @@ if ($CFG->branch < '400') {
 // Show notification if the meeting does not exist on Zoom.
 if ($showrecreate) {
     // Only show recreate/delete links in the message for users that can edit.
-    if ($iszoommanager) {
+    // A pooled recurring series that Zoom has purged is a normal end state,
+    // not a broken activity: the sessions and recordings below are intact,
+    // and adding a date continues it. Say that, instead of announcing an
+    // untraceable meeting — which reads as data loss.
+    $seriesended = zoom_pooled_group() !== null && !empty($zoom->recurring) && empty($zoom->webinar);
+
+    if ($seriesended) {
+        $message = get_string($iszoommanager ? 'zoomerr_meetingpurged' : 'zoomerr_meetingpurged_info', 'mod_zoom');
+        $style = \core\output\notification::NOTIFY_INFO;
+    } else if ($iszoommanager) {
         $message = get_string('zoomerr_meetingnotfound', 'mod_zoom', zoom_meetingnotfound_param($cm->id));
         $style = \core\output\notification::NOTIFY_ERROR;
     } else {

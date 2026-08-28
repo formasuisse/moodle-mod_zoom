@@ -262,6 +262,17 @@ function zoom_update_instance(stdClass $zoom, ?mod_zoom_mod_form $mform = null) 
         }
     }
 
+    // A series Zoom has purged has no meeting left to patch or read back —
+    // both calls below would throw 3001. Its settings still matter: they are
+    // stored here and applied to the replacement meeting when the series is
+    // continued (zoom_pooled_occurrence_revive()). So persist locally, keep
+    // the calendar and grade item in step, and stop.
+    if ($updatedzoomrecord->exists_on_zoom != ZOOM_MEETING_EXISTS) {
+        zoom_calendar_item_update($zoom);
+        zoom_grade_item_update($zoom);
+        return true;
+    }
+
     // Update meeting on Zoom.
     try {
         zoom_webservice()->update_meeting($zoom, $zoom->coursemodule);

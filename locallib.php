@@ -1857,7 +1857,12 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
         }
     }
 
-    $canedit = $iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS;
+    // A series Zoom has purged is NOT a dead activity: adding a date revives
+    // it onto a fresh meeting (occurrence.php 'add'), keeping this activity,
+    // its session history and its recordings. So the add form stays
+    // available; only the per-row actions need a live meeting to act on.
+    $purged = ($zoom->exists_on_zoom != ZOOM_MEETING_EXISTS);
+    $canedit = $iszoommanager && !empty($zoom->recurring);
 
     $occurrenceurl = function (array $params) use ($cm) {
         return (new moodle_url('/mod/zoom/occurrence.php', ['id' => $cm->id] + $params))->out(false);
@@ -1869,7 +1874,7 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
     foreach ($rows as $row) {
         $cancelled = ($row->status === 'deleted');
         $past = !$cancelled && ($row->starttime + ($row->duration ?: HOURSECS)) < $now;
-        $editable = $canedit && !$cancelled && !$past && $row->occurrenceid !== '';
+        $editable = $canedit && !$purged && !$cancelled && !$past && $row->occurrenceid !== '';
         if (!$cancelled) {
             $lastactive = $row;
         }
@@ -1925,7 +1930,7 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
             'cancelurl' => $editable ? $occurrenceurl(['action' => 'cancel', 'occurrence' => $row->occurrenceid]) : null,
             'discardurl' => $editable ? $occurrenceurl(['action' => 'discard', 'occurrence' => $row->occurrenceid]) : null,
             // Cancellation artifact cleanup: hide it from the list.
-            'hideurl' => ($canedit && $cancelled && $row->occurrenceid !== '') ? $occurrenceurl([
+            'hideurl' => ($canedit && !$purged && $cancelled && $row->occurrenceid !== '') ? $occurrenceurl([
                 'action' => 'hide', 'occurrence' => $row->occurrenceid, 'sesskey' => sesskey(),
             ]) : null,
         ];
@@ -2313,6 +2318,76 @@ function zoom_pooled_occurrence_add($zoom, $start, $duration) {
     // write derives from the Zoom readback, never from this field). Zoom's
     // end_times counts tombstones, i.e. every store row.
     $DB->set_field('zoom', 'end_times', $DB->count_records('zoom_occurrences', ['zoomid' => $zoom->id]), ['id' => $zoom->id]);
+}
+
+/**
+ * Continue a series whose Zoom meeting is gone, on a fresh Zoom meeting.
+ *
+ * Pooled-hosts feature. Zoom drops the scheduling object of a recurring
+ * meeting once its series is over — GET returns 3001 — while keeping the
+ * recordings, which live in a separate, UUID-keyed store. The Moodle
+ * activity is therefore very much alive: its session history and its
+ * recordings are intact, only the thing to hang a NEW date on is missing.
+ *
+ * Zoom has no undelete, so continuing the series means creating a
+ * replacement meeting under the same activity. The new meeting_id changes
+ * the join link (the caller confirms that with the user first); everything
+ * else survives. Past occurrence rows are kept by
+ * zoom_pooled_sync_occurrences(), recordings hang off zoomid + UUID rather
+ * than the meeting id, and the meeting being left behind is remembered so
+ * its still-processing recordings keep reaching this activity.
+ *
+ * @param stdClass $zoom zoom record (its meeting is gone from Zoom).
+ * @param stdClass $cm Course module.
+ * @param int $start First session of the revived series (Unix timestamp).
+ * @param int $duration Its duration in seconds.
+ * @return stdClass The refreshed zoom record.
+ * @throws moodle_exception zoomerr_pool_* when no pool member fits the slot.
+ */
+function zoom_pooled_occurrence_revive($zoom, $cm, $start, $duration) {
+    global $CFG, $DB;
+    require_once($CFG->dirroot . '/mod/zoom/lib.php');
+
+    $slots = [[$start, $duration]];
+    $hostid = zoom_pooled_pick_host($zoom, $slots, context_module::instance($cm->id));
+
+    // Remember the meeting we are leaving BEFORE the record is overwritten:
+    // its last recording may still be processing on Zoom, and recording
+    // discovery matches on meeting id.
+    zoom_record_superseded_meeting($zoom->id, $zoom->meeting_id, $zoom->host_id);
+
+    // Rebuild the series as a one-date scaffold, the same shape the create
+    // path uses (lib.php): weekly rule anchored on the new date, one
+    // occurrence, then moved onto the exact slot by zoom_pooled_apply_plan().
+    $timezone = !empty($CFG->timezone) ? $CFG->timezone : date_default_timezone_get();
+    $weekday = (int) (new DateTimeImmutable('@' . $start))
+        ->setTimezone(new DateTimeZone($timezone))->format('w') + 1;
+
+    $zoom->host_id = $hostid;
+    $zoom->start_time = $start;
+    $zoom->duration = $duration;
+    $zoom->recurring = 1;
+    $zoom->recurrence_type = ZOOM_RECURRINGTYPE_WEEKLY;
+    $zoom->repeat_interval = 1;
+    $zoom->weekly_days = (string) $weekday;
+    $zoom->end_date_option = ZOOM_END_DATE_OPTION_AFTER;
+    $zoom->end_times = 1;
+
+    // Tracking fields are stored per activity, not per meeting — carry them
+    // onto the replacement (recreate.php does the same).
+    foreach ($DB->get_records('zoom_meeting_tracking_fields', ['meeting_id' => $zoom->id]) as $trackingfield) {
+        $field = $trackingfield->tracking_field;
+        $zoom->$field = $trackingfield->value;
+    }
+
+    $response = zoom_webservice()->create_meeting($zoom, $cm->id);
+    $zoom = populate_zoom_from_response($zoom, $response);
+    $zoom->exists_on_zoom = ZOOM_MEETING_EXISTS;
+    $zoom->timemodified = time();
+    $DB->update_record('zoom', $zoom);
+    zoom_sync_meeting_tracking_fields($zoom->id, $response->tracking_fields ?? []);
+
+    return zoom_pooled_apply_plan($zoom, $response->occurrences ?? [], $slots);
 }
 
 /**
