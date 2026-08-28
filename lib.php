@@ -1433,7 +1433,16 @@ function zoom_cm_info_dynamic(cm_info $cm) {
     require_once($CFG->dirroot . '/mod/zoom/locallib.php');
 
     if (method_exists($cm, 'override_customdata')) {
-        $moduleinstance = $DB->get_record('zoom', ['id' => $cm->instance], '*', MUST_EXIST);
+        // Never MUST_EXIST here. This callback runs on every course page render, so
+        // throwing takes down the whole course, not just this activity. A modinfo
+        // cache entry can outlive the instance row it points at: a failed
+        // \core_course\task\course_delete_modules throws before it reaches
+        // rebuild_course_cache(), leaving the stale entry in place until something
+        // else bumps the course cacherev (MDL-83460).
+        $moduleinstance = $DB->get_record('zoom', ['id' => $cm->instance]);
+        if (!$moduleinstance) {
+            return;
+        }
 
         // Get meeting state from Zoom.
         [$inprogress, $available, $finished] = zoom_get_state($moduleinstance);
