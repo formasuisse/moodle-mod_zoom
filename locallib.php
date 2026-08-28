@@ -1334,10 +1334,10 @@ function zoom_get_meeting_recordings_grouped($zoomid = null) {
  * the Zoom trash, so there is nothing left to share, and a set with no rows
  * still on Zoom is left alone rather than patched into a 404.
  *
- * The set is the finest granularity Zoom offers. A meeting whose host
- * stopped and restarted recording carries several recording-start groups
- * under one meetinguuid, and hiding one of them cannot revoke it while
- * another is still visible: sharing is one flag for the whole set.
+ * Moodle's per-row visibility stays finer than this and stays independent:
+ * hiding the transcript while keeping the video is a list-level decision,
+ * and Zoom has no per-file permission to mirror it onto. Sharing only goes
+ * off once nothing of the set is listed to students any more.
  *
  * @param string $meetinguuid The UUID of a meeting with recordings.
  * @param \mod_zoom\webservice|null $service The service to call, for testing.
@@ -1365,37 +1365,6 @@ function zoom_recording_sharing_sync($meetinguuid, $service = null) {
     }
 
     return true;
-}
-
-/**
- * Show or hide one recording group, then reconcile Zoom sharing.
- *
- * A group is every row of a meeting sharing one recording start: the video
- * the tables list plus its audio, transcript, chat and caption siblings.
- * They are one recording, and Zoom shares per set, so a toggle that moved
- * only the video row would leave the siblings visible and the set shared,
- * and hiding would not actually revoke anything. Both surfaces therefore
- * write the whole group.
- *
- * @param int $zoomid The zoom activity id.
- * @param string $meetinguuid The UUID of the meeting the recording belongs to.
- * @param int $recordingstart Start of the recording group.
- * @param int $show 1 to show, 0 to hide.
- * @param \mod_zoom\webservice|null $service The service to call, for testing.
- * @return bool Whether Zoom now matches Moodle.
- */
-function zoom_recording_set_visibility($zoomid, $meetinguuid, $recordingstart, $show, $service = null) {
-    global $DB;
-
-    $group = [
-        'zoomid' => $zoomid,
-        'meetinguuid' => $meetinguuid,
-        'recordingstart' => $recordingstart,
-    ];
-    $DB->set_field('zoom_meeting_recordings', 'showrecording', $show ? 1 : 0, $group);
-    $DB->set_field('zoom_meeting_recordings', 'timemodified', time(), $group);
-
-    return zoom_recording_sharing_sync($meetinguuid, $service);
 }
 
 /**
