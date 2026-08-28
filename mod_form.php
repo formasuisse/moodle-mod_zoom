@@ -148,10 +148,19 @@ class mod_zoom_mod_form extends moodleform_mod {
             } catch (\mod_zoom\webservice_exception $error) {
                 // If the meeting can't be found, offer to recreate the meeting on Zoom.
                 if (zoom_is_meeting_gone_error($error)) {
-                    $errstring = 'zoomerr_meetingnotfound';
-                    $param = zoom_meetingnotfound_param($this->_cm->id);
-                    $nexturl = "/mod/zoom/view.php?id=" . $this->_cm->id;
-                    zoom_fatal_error($errstring, 'mod_zoom', $nexturl, $param, "meeting/get : $error");
+                    // Pooled occurrence-first: a purged series keeps its
+                    // settings — they are applied to the replacement meeting
+                    // when the series is continued from the occurrence table
+                    // — so dead-ending the settings form here just locks the
+                    // manager out of their own activity. Warn and carry on.
+                    if ($pooled && !empty($this->current->recurring) && empty($this->current->webinar)) {
+                        \core\notification::warning(get_string('zoomerr_meetingpurged_form', 'mod_zoom'));
+                    } else {
+                        $errstring = 'zoomerr_meetingnotfound';
+                        $param = zoom_meetingnotfound_param($this->_cm->id);
+                        $nexturl = "/mod/zoom/view.php?id=" . $this->_cm->id;
+                        zoom_fatal_error($errstring, 'mod_zoom', $nexturl, $param, "meeting/get : $error");
+                    }
                 } else {
                     throw $error;
                 }

@@ -55,8 +55,12 @@ require_capability('mod/zoom:addinstance', $context);
 $zoom = $DB->get_record('zoom', ['id' => $cm->instance], '*', MUST_EXIST);
 $viewurl = new moodle_url('/mod/zoom/view.php', ['id' => $cm->id]);
 
+// A series Zoom has purged still accepts ONE action: adding a date, which
+// revives it onto a fresh meeting. Everything else needs a live meeting to
+// act on.
+$purged = ($zoom->exists_on_zoom != ZOOM_MEETING_EXISTS);
 if (zoom_pooled_group() === null || !empty($zoom->webinar) || empty($zoom->recurring)
-        || $zoom->exists_on_zoom != ZOOM_MEETING_EXISTS) {
+        || ($purged && $action !== 'add')) {
     redirect($viewurl);
 }
 
@@ -165,6 +169,49 @@ function mod_zoom_occurrence_require_confirm($cm, $viewurl, $action, $occurrence
     die();
 }
 
+/**
+ * Require confirmation before continuing a series Zoom has purged.
+ *
+ * Reviving mints a new Zoom meeting (Zoom has no undelete), so the join
+ * link changes — students holding the old one are left with a dead link.
+ * That is worth one deliberate click, unlike an ordinary add.
+ *
+ * @param stdClass $cm Course module.
+ * @param moodle_url $viewurl Back target.
+ * @param int $start Requested slot start.
+ * @param int $duration Requested slot duration in seconds.
+ * @return void
+ */
+function mod_zoom_revive_require_confirm($cm, $viewurl, $start, $duration) {
+    global $OUTPUT;
+
+    if (optional_param('confirm', 0, PARAM_INT) && confirm_sesskey()) {
+        return;
+    }
+
+    [$local] = zoom_pooled_local_start($start);
+    echo $OUTPUT->header();
+    $confirmurl = new moodle_url('/mod/zoom/occurrence.php', [
+        'id' => $cm->id, 'action' => 'add', 'confirm' => 1, 'sesskey' => sesskey(),
+        'newdate' => substr($local, 0, 10),
+        'newtime' => substr($local, 11, 5),
+        'newduration' => (int) round($duration / MINSECS),
+    ]);
+    $confirmbutton = new single_button(
+        $confirmurl,
+        get_string('occ_revive_confirm_btn', 'mod_zoom'),
+        'post'
+    );
+    $backbutton = new single_button($viewurl, get_string('back'), 'get');
+    echo $OUTPUT->confirm(
+        get_string('occ_revive_confirm', 'mod_zoom', userdate($start)),
+        $confirmbutton,
+        $backbutton
+    );
+    echo $OUTPUT->footer();
+    die();
+}
+
 $PAGE->set_url('/mod/zoom/occurrence.php', ['id' => $cm->id, 'action' => $action, 'occurrence' => $occurrenceid]);
 $PAGE->set_title(format_string($zoom->name));
 $PAGE->set_heading(format_string($course->fullname));
@@ -174,6 +221,15 @@ try {
         case 'add':
             require_sesskey();
             [$start, $duration] = mod_zoom_occurrence_slot_params($viewurl);
+            if ($purged) {
+                // The series has no Zoom meeting left to extend: continue it
+                // on a fresh one, under this same activity.
+                mod_zoom_revive_require_confirm($cm, $viewurl, $start, $duration);
+                zoom_pooled_occurrence_revive($zoom, $cm, $start, $duration);
+                redirect($viewurl, get_string('occ_revived_notify', 'mod_zoom'), null,
+                    \core\output\notification::NOTIFY_SUCCESS);
+            }
+
             zoom_pooled_occurrence_add($zoom, $start, $duration);
             redirect($viewurl, get_string('occ_added_notify', 'mod_zoom'), null,
                 \core\output\notification::NOTIFY_SUCCESS);
