@@ -48,12 +48,20 @@ foreach ($trackingfields as $trackingfield) {
     $zoom->$field = $trackingfield->value;
 }
 
+// The activity is about to move onto a NEW Zoom meeting: remember the one it
+// is leaving behind, so recordings still being processed under it keep
+// reaching this activity instead of being skipped as unknown.
+$supersededmeetingid = $zoom->meeting_id;
+$supersededhostid = $zoom->host_id;
+
 // Set the current zoom table entry to use the new meeting (meeting_id/etc).
 $response = zoom_webservice()->create_meeting($zoom, $cm->id);
 $zoom = populate_zoom_from_response($zoom, $response);
 $zoom->exists_on_zoom = ZOOM_MEETING_EXISTS;
 $zoom->timemodified = time();
 $DB->update_record('zoom', $zoom);
+
+zoom_record_superseded_meeting($zoom->id, $supersededmeetingid, $supersededhostid);
 
 // Return to Zoom page.
 redirect(

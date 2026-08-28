@@ -76,6 +76,22 @@
         <INDEX NAME="zoomid_occurrenceid_idx" UNIQUE="true" FIELDS="zoomid, occurrenceid"/>
       </INDEXES>
     </TABLE>
+    <TABLE NAME="zoom_superseded_meetings" COMMENT="The Zoom meetings an activity used to live on. A recreate mints a NEW meeting (Zoom has no undelete), and recordings outlive the meeting they were made in, so the old ids must stay attributed to the activity.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="zoomid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="link to mdl_zoom table"/>
+        <FIELD NAME="meeting_id" TYPE="int" LENGTH="15" NOTNULL="true" SEQUENCE="false" COMMENT="The superseded meeting_id per Zoom API."/>
+        <FIELD NAME="host_id" TYPE="char" LENGTH="30" NOTNULL="true" SEQUENCE="false" COMMENT="Zoom user that owned the superseded meeting (may differ from the activity's current host)."/>
+        <FIELD NAME="timecreated" TYPE="int" LENGTH="12" NOTNULL="true" SEQUENCE="false" COMMENT="When the meeting was superseded."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="zoomid_foreign" TYPE="foreign" FIELDS="zoomid" REFTABLE="zoom" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="zoomid_meetingid_idx" UNIQUE="true" FIELDS="zoomid, meeting_id"/>
+      </INDEXES>
+    </TABLE>
     <TABLE NAME="zoom_meeting_details" COMMENT="A queue for the Cron to add meeting report info to zoom_meetings_participants table.">
       <FIELDS>
         <FIELD NAME="uuid" TYPE="char" LENGTH="30" NOTNULL="true" SEQUENCE="false" COMMENT="The meeting UUID or webinar UUID per Zoom API."/>

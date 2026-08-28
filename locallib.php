@@ -1262,13 +1262,64 @@ function zoom_get_all_meeting_records() {
     global $DB;
 
     $meetings = [];
-    // Only get meetings that exist on zoom.
-    $records = $DB->get_records('zoom', ['exists_on_zoom' => ZOOM_MEETING_EXISTS]);
+    // EVERY activity, including those whose meeting is gone from Zoom.
+    // Recordings outlive the meeting they were made in — Zoom keeps them in
+    // a separate, UUID-keyed store that survives the meeting's deletion —
+    // and cloud processing takes minutes to hours, so a meeting marked
+    // expired today can still surface its last recording tomorrow. Filtering
+    // on exists_on_zoom here silently dropped exactly those.
+    $records = $DB->get_records('zoom');
     foreach ($records as $record) {
         $meetings[] = $record;
     }
 
     return $meetings;
+}
+
+/**
+ * Remember the Zoom meeting an activity is leaving behind.
+ *
+ * An activity can live on several Zoom meetings in succession: a recreate
+ * mints a NEW meeting id (Zoom has no undelete), and the recordings made
+ * under the old one still belong to this activity. Recording discovery
+ * matches on meeting id, so without this the last session's recording — the
+ * one still being processed when the swap happened — would never be found.
+ *
+ * Idempotent: re-recording the same pair is a no-op.
+ *
+ * @param int $zoomid zoom table id.
+ * @param int $meetingid The meeting_id being superseded.
+ * @param string $hostid The Zoom user that owned it (the activity's new host may differ).
+ * @return void
+ */
+function zoom_record_superseded_meeting($zoomid, $meetingid, $hostid) {
+    global $DB;
+
+    if (empty($meetingid) || $meetingid == -1 || empty($hostid)) {
+        return;
+    }
+
+    if ($DB->record_exists('zoom_superseded_meetings', ['zoomid' => $zoomid, 'meeting_id' => $meetingid])) {
+        return;
+    }
+
+    $DB->insert_record('zoom_superseded_meetings', (object) [
+        'zoomid' => $zoomid,
+        'meeting_id' => $meetingid,
+        'host_id' => $hostid,
+        'timecreated' => time(),
+    ]);
+}
+
+/**
+ * Every meeting an activity has been superseded off, oldest first.
+ *
+ * @return array zoom_superseded_meetings records.
+ */
+function zoom_get_superseded_meeting_records() {
+    global $DB;
+
+    return $DB->get_records('zoom_superseded_meetings', null, 'id ASC');
 }
 
 /**
