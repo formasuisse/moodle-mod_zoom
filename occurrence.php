@@ -200,9 +200,14 @@ try {
             require_sesskey();
             $recordingid = required_param('recording', PARAM_INT);
             $show = required_param('show', PARAM_INT) ? 1 : 0;
-            $DB->get_record('zoom_meeting_recordings',
-                ['id' => $recordingid, 'zoomid' => $zoom->id], 'id', MUST_EXIST);
+            $rec = $DB->get_record('zoom_meeting_recordings',
+                ['id' => $recordingid, 'zoomid' => $zoom->id], 'id, meetinguuid', MUST_EXIST);
             $DB->set_field('zoom_meeting_recordings', 'showrecording', $show, ['id' => $recordingid]);
+            if (!zoom_recording_sharing_sync($rec->meetinguuid)) {
+                redirect($viewurl, get_string('recordingsharingfailed', 'mod_zoom'), null,
+                    \core\output\notification::NOTIFY_WARNING);
+            }
+
             redirect($viewurl);
 
         case 'cancel':

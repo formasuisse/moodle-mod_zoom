@@ -43,7 +43,9 @@ require_capability('mod/zoom:view', $context);
 
 // Only show recording that is visble and valid. Managers can follow the
 // link of a hidden recording too (the occurrences table lists them for
-// review) — hiding gates students, not the people doing the hiding.
+// review) — hiding gates students, not the people doing the hiding. Note
+// that hiding also unshares the set on Zoom, so the link itself only opens
+// for Zoom account admins until it is shown again.
 $params = [
     'id' => $recordingid,
     'zoomid' => $zoom->id,

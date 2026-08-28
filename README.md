@@ -62,6 +62,7 @@ Optional functionality can be enabled by granting additional scopes:
     - cloud_recording:read:list_recording_files:admin
     - cloud_recording:read:list_user_recordings:admin
     - cloud_recording:read:recording_settings:admin
+    - cloud_recording:update:recording_settings:admin
 - Tracking fields (zoom | defaulttrackingfields)
     - tracking_field:read:list_tracking_fields:admin
 - Recycle licenses (zoom | utmost), (zoom | recycleonjoin), (zoom | protectedgroups)
