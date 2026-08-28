@@ -26,6 +26,7 @@ namespace mod_zoom;
 
 use advanced_testcase;
 use moodle_exception;
+use mod_zoom\not_found_exception;
 
 defined('MOODLE_INTERNAL') || die();
 
@@ -83,13 +84,16 @@ final class recording_sharing_test extends advanced_testcase {
      * @param bool $throws Whether the call should fail like a Zoom API error.
      * @return \PHPUnit\Framework\MockObject\MockObject
      */
-    private function mockservice($throws = false) {
+    private function mockservice($throws = false, $gone = false) {
         $mock = $this->getMockBuilder(webservice::class)
             ->onlyMethods(['set_recording_sharing'])
             ->disableOriginalConstructor()
             ->getMock();
 
-        if ($throws) {
+        if ($gone) {
+            $mock->method('set_recording_sharing')
+                ->willThrowException(new not_found_exception('This recording does not exist.', 3301));
+        } else if ($throws) {
             $mock->method('set_recording_sharing')
                 ->willThrowException(new moodle_exception('errorwebservice', 'mod_zoom', '', 'boom'));
         } else {
@@ -177,6 +181,17 @@ final class recording_sharing_test extends advanced_testcase {
     public function test_unknown_set_is_not_called(): void {
         $this->assertTrue(zoom_recording_sharing_sync('uuid-missing', $this->mockservice()));
         $this->assertSame([], $this->calls);
+    }
+
+    public function test_set_deleted_on_zoom_is_not_an_error(): void {
+        // Recording deleted in the portal, or its meeting deleted: the rows
+        // survive locally and point at a dead uuid. Nothing is left to
+        // reconcile, and the person toggling can do nothing about it, so
+        // this must not put a warning in front of them on every click.
+        $this->recording('uuid-gone', 1, 'rec-1');
+
+        $this->assertTrue(zoom_recording_sharing_sync('uuid-gone', $this->mockservice(false, true)));
+        $this->assertDebuggingCalled();
     }
 
     public function test_api_failure_is_reported(): void {

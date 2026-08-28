@@ -1334,6 +1334,9 @@ function zoom_get_meeting_recordings_grouped($zoomid = null) {
  * the Zoom trash, so there is nothing left to share, and a set with no rows
  * still on Zoom is left alone rather than patched into a 404.
  *
+ * A set Zoom no longer has is treated as reconciled: there is nothing left
+ * to share, and the visibility change has already been saved locally.
+ *
  * Moodle's per-row visibility stays finer than this and stays independent:
  * hiding the transcript while keeping the video is a list-level decision,
  * and Zoom has no per-file permission to mirror it onto. Sharing only goes
@@ -1359,6 +1362,16 @@ function zoom_recording_sharing_sync($meetinguuid, $service = null) {
     try {
         $service = $service ?? zoom_webservice();
         $service->set_recording_sharing($meetinguuid, $shared);
+    } catch (\mod_zoom\not_found_exception $error) {
+        // The set is gone from Zoom — deleted in the portal, or its meeting
+        // was — so there is no sharing left to reconcile and nothing the
+        // person toggling can do about it. Their visibility change is
+        // already saved; failing here would only put a warning in front of
+        // them on every click. The rows left pointing at a dead uuid are a
+        // separate problem: the list still offers links that cannot play.
+        debugging('Zoom recording set ' . $meetinguuid . ' no longer exists: ' . $error->getMessage(),
+            DEBUG_DEVELOPER);
+        return true;
     } catch (moodle_exception $error) {
         debugging('Could not set Zoom sharing for recording set ' . $meetinguuid . ': ' . $error->getMessage());
         return false;
