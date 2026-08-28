@@ -37,6 +37,7 @@ require_once($CFG->dirroot . '/mod/zoom/locallib.php');
  * Zoom's per-set share_recording flag.
  *
  * @covers ::zoom_recording_sharing_sync
+ * @covers ::zoom_recording_set_visibility
  */
 final class recording_sharing_test extends advanced_testcase {
     /** @var array Calls captured from the mocked webservice. */
@@ -57,7 +58,8 @@ final class recording_sharing_test extends advanced_testcase {
      * @param int|null $timepurged Purge timestamp, null when still on Zoom.
      * @return void
      */
-    private function recording($meetinguuid, $show, $recordingid, $timepurged = null) {
+    private function recording($meetinguuid, $show, $recordingid, $timepurged = null,
+            $recordingtype = 'active_speaker', $recordingstart = 1000) {
         global $DB;
 
         $DB->insert_record('zoom_meeting_recordings', (object) [
@@ -69,8 +71,8 @@ final class recording_sharing_test extends advanced_testcase {
             'passcode' => 'passcode',
             'playpasscode' => 'playtoken',
             'timepurged' => $timepurged,
-            'recordingtype' => 'active_speaker',
-            'recordingstart' => 1000,
+            'recordingtype' => $recordingtype,
+            'recordingstart' => $recordingstart,
             'showrecording' => $show,
             'timecreated' => 1000,
             'timemodified' => 1000,
@@ -155,6 +157,51 @@ final class recording_sharing_test extends advanced_testcase {
     public function test_unknown_set_is_not_called(): void {
         $this->assertTrue(zoom_recording_sharing_sync('uuid-missing', $this->mockservice()));
         $this->assertSame([], $this->calls);
+    }
+
+    public function test_hiding_a_group_hides_its_siblings_and_unshares(): void {
+        // The occurrence table lists only the video row. Hiding it must take
+        // the audio and transcript rows with it, otherwise a sibling left
+        // visible keeps the whole set shared and the link keeps playing.
+        $this->recording('uuid-a', 1, 'rec-video', null, 'active_speaker');
+        $this->recording('uuid-a', 1, 'rec-audio', null, 'audio_only');
+        $this->recording('uuid-a', 1, 'rec-text', null, 'audio_transcript');
+
+        $this->assertTrue(zoom_recording_set_visibility(1, 'uuid-a', 1000, 0, $this->mockservice()));
+
+        global $DB;
+        $this->assertSame(0, $DB->count_records('zoom_meeting_recordings',
+            ['meetinguuid' => 'uuid-a', 'showrecording' => 1]));
+        $this->assertSame([['uuid-a', false]], $this->calls);
+    }
+
+    public function test_showing_a_group_shares_it(): void {
+        $this->recording('uuid-a', 0, 'rec-video', null, 'active_speaker');
+        $this->recording('uuid-a', 0, 'rec-audio', null, 'audio_only');
+
+        $this->assertTrue(zoom_recording_set_visibility(1, 'uuid-a', 1000, 1, $this->mockservice()));
+
+        global $DB;
+        $this->assertSame(2, $DB->count_records('zoom_meeting_recordings',
+            ['meetinguuid' => 'uuid-a', 'showrecording' => 1]));
+        $this->assertSame([['uuid-a', true]], $this->calls);
+    }
+
+    public function test_other_recording_groups_of_the_same_meeting_are_untouched(): void {
+        // Stop/restart within one meeting: two groups, one meetinguuid. The
+        // toggle moves only its own group, and Zoom cannot unshare one group
+        // while the other is visible, so the set stays shared.
+        $this->recording('uuid-a', 1, 'rec-first', null, 'active_speaker', 1000);
+        $this->recording('uuid-a', 1, 'rec-second', null, 'active_speaker', 2000);
+
+        zoom_recording_set_visibility(1, 'uuid-a', 1000, 0, $this->mockservice());
+
+        global $DB;
+        $this->assertSame(0, $DB->get_field('zoom_meeting_recordings', 'showrecording',
+            ['zoomrecordingid' => 'rec-first']));
+        $this->assertSame(1, $DB->get_field('zoom_meeting_recordings', 'showrecording',
+            ['zoomrecordingid' => 'rec-second']));
+        $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
     public function test_api_failure_is_reported(): void {

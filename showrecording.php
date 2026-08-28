@@ -61,20 +61,13 @@ if (empty($recordings)) {
     throw new moodle_exception('recordingnotfound', 'mod_zoom');
 }
 
-$now = time();
-
-// Toggle the showrecording value.
+// Toggle the showrecording value. Visibility in Moodle is what grants access
+// on Zoom: without the reconcile the recording stays unshared and only admins
+// can play it.
 $sharingsynced = true;
 if ($showrecording === 1 || $showrecording === 0) {
-    foreach ($recordings as $rec) {
-        $rec->showrecording = $showrecording;
-        $rec->timemodified = $now;
-        $DB->update_record('zoom_meeting_recordings', $rec);
-    }
-
-    // Visibility in Moodle is what grants access on Zoom: without this the
-    // recording stays unshared and only admins can play it.
-    $sharingsynced = zoom_recording_sharing_sync($meetinguuid);
+    $sharingsynced = zoom_recording_set_visibility(
+        $zoom->id, $meetinguuid, $recordingstart, $showrecording);
 }
 
 if (!$sharingsynced) {
