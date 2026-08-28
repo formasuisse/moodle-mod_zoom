@@ -1095,5 +1095,27 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026081600, 'zoom');
     }
 
+    if ($oldversion < 2026082801) {
+        // An activity can live on several Zoom meetings in succession (a
+        // recreate mints a new one — Zoom has no undelete). Recordings
+        // outlive the meeting they were made in, so the superseded ids have
+        // to stay attributed to the activity.
+        $table = new xmldb_table('zoom_superseded_meetings');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('zoomid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('meeting_id', XMLDB_TYPE_INTEGER, '15', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('host_id', XMLDB_TYPE_CHAR, '30', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('timecreated', XMLDB_TYPE_INTEGER, '12', null, XMLDB_NOTNULL, null, null);
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_key('zoomid_foreign', XMLDB_KEY_FOREIGN, ['zoomid'], 'zoom', ['id']);
+        $table->add_index('zoomid_meetingid_idx', XMLDB_INDEX_UNIQUE, ['zoomid', 'meeting_id']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        // Zoom savepoint reached.
+        upgrade_mod_savepoint(true, 2026082801, 'zoom');
+    }
+
     return true;
 }

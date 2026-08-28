@@ -480,6 +480,9 @@ function zoom_delete_instance($id) {
     // Pooled-hosts feature: drop the persisted occurrence list.
     $DB->delete_records('zoom_occurrences', ['zoomid' => $zoom->id]);
 
+    // Drop the record of the meetings this activity used to live on.
+    $DB->delete_records('zoom_superseded_meetings', ['zoomid' => $zoom->id]);
+
     // Delete any dependent records here.
     zoom_calendar_item_delete($zoom);
     zoom_grade_item_delete($zoom);

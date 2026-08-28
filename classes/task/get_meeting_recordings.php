@@ -104,11 +104,31 @@ class get_meeting_recordings extends scheduled_task {
 
         $hostmeetings = [];
 
+        $byzoomid = [];
         foreach ($localmeetings as $zoom) {
+            $byzoomid[$zoom->id] = $zoom;
             // Only get recordings for this meeting if its recurring or already finished.
             if ($zoom->recurring || $now > (intval($zoom->start_time) + intval($zoom->duration))) {
                 $hostmeetings[$zoom->host_id][$zoom->meeting_id] = $zoom;
             }
+        }
+
+        // An activity can have lived on several Zoom meetings in succession
+        // (a recreate mints a new id — Zoom has no undelete). Their
+        // recordings still belong to this activity, and Zoom takes minutes
+        // to hours to finish processing one, so a meeting superseded today
+        // may only surface its last recording tomorrow. Index the old ids
+        // under the host that owned them, alongside the current meeting.
+        foreach (zoom_get_superseded_meeting_records() as $superseded) {
+            if (!isset($byzoomid[$superseded->zoomid])) {
+                continue;
+            }
+
+            if (isset($hostmeetings[$superseded->host_id][$superseded->meeting_id])) {
+                continue;
+            }
+
+            $hostmeetings[$superseded->host_id][$superseded->meeting_id] = $byzoomid[$superseded->zoomid];
         }
 
         if (empty($hostmeetings)) {
