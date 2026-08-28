@@ -1619,6 +1619,38 @@ function zoom_pooled_occurrence_slots($zoom, array $occurrences) {
 }
 
 /**
+ * The slots a series still has to hold, from the persisted occurrence store.
+ *
+ * Pooled-hosts feature. Only FUTURE, non-tombstoned rows book a host:
+ * cancelled sessions were struck on Zoom and past ones are history (their
+ * time is spent, and the recordings hanging off them do not reserve
+ * anything). A series whose dates are all behind it therefore books
+ * nothing, which is exactly what lets it be rehosted anywhere.
+ *
+ * @param int $zoomid zoom table id.
+ * @param int $seriesduration Fallback duration in seconds for rows carrying none.
+ * @return array[] [start (Unix timestamp), duration (seconds)] pairs, by start.
+ */
+function zoom_pooled_pending_slots($zoomid, $seriesduration = 0) {
+    global $DB;
+
+    $seriesduration = (int) $seriesduration ?: HOURSECS;
+    $rows = $DB->get_records_select(
+        'zoom_occurrences',
+        'zoomid = :zoomid AND status = :status AND starttime > :now',
+        ['zoomid' => $zoomid, 'status' => 'available', 'now' => time()],
+        'starttime ASC'
+    );
+
+    $slots = [];
+    foreach ($rows as $row) {
+        $slots[] = [(int) $row->starttime, (int) $row->duration ?: $seriesduration];
+    }
+
+    return $slots;
+}
+
+/**
  * Refresh the persisted occurrence store from a Zoom occurrence list.
  *
  * Pooled-hosts feature (occurrence-first scheduling): the store is a cache
@@ -2432,6 +2464,38 @@ function zoom_pooled_pick_host($zoom, array $slots, $context = null, &$blocking 
     }
 
     throw new moodle_exception('zoomerr_pool_exhausted', 'mod_zoom');
+}
+
+/**
+ * Resolve the Zoom account a missing meeting should be recreated under.
+ *
+ * Pooled-hosts feature: the manager clicking "recreate" has no Zoom identity
+ * of their own — that is the entire premise of the pool — so asking for one
+ * (zoom_get_user_id(), which throws zoomerr_usernotfound) made the banner's
+ * own escape hatch unreachable on every pooled site. The host comes from the
+ * pool instead, picked by the same rules as on create and conflict-checked
+ * against the sessions the recreated series still owes.
+ *
+ * Outside pooled mode the recreating user's own account owns the new
+ * meeting: the former owner may no longer exist on Zoom, which is a common
+ * reason for the meeting to have gone missing in the first place.
+ *
+ * @param stdClass $zoom zoom record.
+ * @param ?context $context Activity context, for the pool events.
+ * @return string Zoom user id to create the replacement meeting under.
+ * @throws moodle_exception zoomerr_usernotfound (unpooled, no Zoom account),
+ *         or the zoomerr_pool_* errors when no pool member fits.
+ */
+function zoom_recreate_host_id($zoom, $context = null) {
+    if (zoom_pooled_group() === null) {
+        return zoom_get_user_id();
+    }
+
+    return zoom_pooled_pick_host(
+        $zoom,
+        zoom_pooled_pending_slots($zoom->id, $zoom->duration ?? 0),
+        $context
+    );
 }
 
 /**
