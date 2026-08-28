@@ -38,9 +38,11 @@ require_capability('mod/zoom:addinstance', $context);
 $PAGE->set_url('/mod/zoom/recreate.php', ['id' => $cm->id]);
 
 // Create a new meeting with Zoom API to replace the missing one.
-// We will use the logged-in user's Zoom account to recreate,
-// in case the meeting's former owner no longer exists on Zoom.
-$zoom->host_id = zoom_get_user_id();
+// The replacement's host is resolved per site mode: the logged-in user's
+// Zoom account normally (the former owner may no longer exist on Zoom), a
+// pool member on a pooled-hosts site (where the manager has no Zoom
+// account of their own).
+$zoom->host_id = zoom_recreate_host_id($zoom, $context);
 
 $trackingfields = $DB->get_records('zoom_meeting_tracking_fields', ['meeting_id' => $zoom->id]);
 foreach ($trackingfields as $trackingfield) {
