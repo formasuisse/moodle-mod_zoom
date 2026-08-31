@@ -557,6 +557,25 @@ if ($hassiteconfig && $ADMIN->fulltree) {
     $defaulttrackingfields->set_updatedcallback('mod_zoom_update_tracking_fields');
     $settings->add($defaulttrackingfields);
 
+    // Fork feature: provenance stamp. Names an existing Zoom tracking field
+    // that every meeting created or updated by this plugin is stamped with.
+    // Empty (the default) disables it entirely.
+    $settings->add(new admin_setting_configtext(
+        'zoom/sourcetrackingfield',
+        new lang_string('sourcetrackingfield', 'mod_zoom'),
+        new lang_string('sourcetrackingfield_help', 'mod_zoom'),
+        '',
+        PARAM_TEXT
+    ));
+
+    $settings->add(new admin_setting_configtext(
+        'zoom/sourcetrackingvalue',
+        new lang_string('sourcetrackingvalue', 'mod_zoom'),
+        new lang_string('sourcetrackingvalue_help', 'mod_zoom'),
+        'Moodle', // Mirrors webservice::SOURCE_TRACKING_VALUE_DEFAULT.
+        PARAM_TEXT
+    ));
+
     // Adding setting for pre-assigned breakout rooms.
     $settings->add(new admin_setting_configcheckbox(
         'zoom/preassignbreakoutrooms',
