@@ -47,13 +47,6 @@ class webservice {
     public const MAX_RETRIES = 5;
 
     /**
-     * Fallback value stamped into the source tracking field when one is
-     * configured but no value is set. Overridable, because a Zoom tracking
-     * field may restrict which values it accepts.
-     */
-    public const SOURCE_TRACKING_VALUE_DEFAULT = 'Moodle';
-
-    /**
      * Default meeting_password_requirement object.
      * @var array
      */
@@ -909,27 +902,6 @@ class webservice {
                 $tf->value = $zoom->$key;
                 $tfarray[] = $tf;
             }
-        }
-
-        // Fork feature: stamp a provenance tracking field on every meeting
-        // this plugin creates or updates, so Moodle-managed meetings can be
-        // told apart from ad-hoc ones created by hand in the Zoom UI.
-        // Deliberately not a form element: provenance must not depend on a
-        // teacher filling it in. No-op unless 'sourcetrackingfield' names a
-        // tracking field that exists on the Zoom account, and the value must
-        // be one the field accepts (Zoom silently drops both unknown fields
-        // and values outside a field's recommended-values list).
-        $sourcefield = trim((string) get_config('zoom', 'sourcetrackingfield'));
-        if ($sourcefield !== '') {
-            $sourcevalue = trim((string) get_config('zoom', 'sourcetrackingvalue'));
-            if ($sourcevalue === '') {
-                $sourcevalue = self::SOURCE_TRACKING_VALUE_DEFAULT;
-            }
-
-            $tf = new stdClass();
-            $tf->field = $sourcefield;
-            $tf->value = $sourcevalue;
-            $tfarray[] = $tf;
         }
 
         $data['tracking_fields'] = $tfarray;
