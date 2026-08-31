@@ -568,6 +568,14 @@ if ($hassiteconfig && $ADMIN->fulltree) {
         PARAM_TEXT
     ));
 
+    $settings->add(new admin_setting_configtext(
+        'zoom/sourcetrackingvalue',
+        new lang_string('sourcetrackingvalue', 'mod_zoom'),
+        new lang_string('sourcetrackingvalue_help', 'mod_zoom'),
+        'Moodle', // Mirrors webservice::SOURCE_TRACKING_VALUE_DEFAULT.
+        PARAM_TEXT
+    ));
+
     // Adding setting for pre-assigned breakout rooms.
     $settings->add(new admin_setting_configcheckbox(
         'zoom/preassignbreakoutrooms',
