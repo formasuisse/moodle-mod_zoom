@@ -1822,22 +1822,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
         return null;
     }
 
-    // Video recordings grouped by local calendar day of the recording start.
-    $recordingsbyday = [];
-    if (get_config('zoom', 'viewrecordings')) {
-        foreach ($DB->get_records('zoom_meeting_recordings', ['zoomid' => $zoom->id], 'recordingstart ASC') as $recording) {
-            if (!in_array($recording->recordingtype, ZOOM_POOLED_VIDEO_RECORDING_TYPES, true)) {
-                continue;
-            }
-
-            if (!$iszoommanager && intval($recording->showrecording) !== 1) {
-                continue;
-            }
-
-            $recordingsbyday[userdate($recording->recordingstart, '%Y%m%d')][] = $recording;
-        }
-    }
-
     $canedit = $iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS;
 
     $occurrenceurl = function (array $params) use ($cm) {
@@ -1858,38 +1842,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
         $durationseconds = (int) ($row->duration ?: $zoom->duration);
         $formid = 'zoom-occ-move-' . $row->occurrenceid;
 
-        $recordings = [];
-        if (!$cancelled) {
-            $dayrecordings = array_values($recordingsbyday[userdate($row->starttime, '%Y%m%d')] ?? []);
-            foreach ($dayrecordings as $i => $recording) {
-                $label = get_string('occ_recording', 'mod_zoom');
-                // Several recordings on one session (stop/restart segments,
-                // multiple video views): the start time is what tells them
-                // apart — the name is just the meeting topic, identical on
-                // all of them.
-                if (count($dayrecordings) > 1) {
-                    $label .= ' ' . userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'));
-                }
-
-                $hidden = intval($recording->showrecording) !== 1;
-                $recordings[] = [
-                    'url' => (new moodle_url('/mod/zoom/loadrecording.php', [
-                        'id' => $cm->id, 'recordingid' => $recording->id,
-                    ]))->out(false),
-                    'label' => $label,
-                    'title' => get_string('occ_recording_started', 'mod_zoom',
-                        userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'))),
-                    'hidden' => $hidden,
-                    'first' => $i === 0,
-                    // Per-recording visibility toggle, right in the table.
-                    'toggleurl' => $iszoommanager ? $occurrenceurl([
-                        'action' => 'recshow', 'recording' => $recording->id,
-                        'show' => $hidden ? 1 : 0, 'sesskey' => sesskey(),
-                    ]) : null,
-                ];
-            }
-        }
-
         $occurrences[] = [
             'datetext' => userdate($row->starttime, get_string('strftimedaydate', 'langconfig')),
             'timetext' => userdate($row->starttime, get_string('strftimetime24', 'langconfig')),
@@ -1902,7 +1854,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
             'formid' => $formid,
             'occurrenceid' => $row->occurrenceid,
             'slot' => $editable ? zoom_pooled_slot_context((int) $row->starttime, $formid, true) : null,
-            'recordings' => $recordings,
             'cancelurl' => $editable ? $occurrenceurl(['action' => 'cancel', 'occurrence' => $row->occurrenceid]) : null,
             'discardurl' => $editable ? $occurrenceurl(['action' => 'discard', 'occurrence' => $row->occurrenceid]) : null,
             // Cancellation artifact cleanup: hide it from the list.
@@ -1915,7 +1866,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
     $context = [
         'ismanager' => $iszoommanager,
         'canedit' => $canedit,
-        'showrecordings' => !empty($recordingsbyday) || $iszoommanager,
         'cmid' => $cm->id,
         'sesskey' => sesskey(),
         'actionurl' => (new moodle_url('/mod/zoom/occurrence.php'))->out(false),
