@@ -1095,5 +1095,25 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026081600, 'zoom');
     }
 
+    if ($oldversion < 2026090111) {
+        // infra #1235: remove the fork recording fields. Recording sync/display
+        // revert to upstream; the fork retention/one-click/purge machinery is gone.
+        $table = new xmldb_table('zoom');
+        $field = new xmldb_field('recordingretention');
+        if ($dbman->field_exists($table, $field)) {
+            $dbman->drop_field($table, $field);
+        }
+
+        $table = new xmldb_table('zoom_meeting_recordings');
+        foreach (['playpasscode', 'timepurged'] as $fname) {
+            $field = new xmldb_field($fname);
+            if ($dbman->field_exists($table, $field)) {
+                $dbman->drop_field($table, $field);
+            }
+        }
+
+        upgrade_mod_savepoint(true, 2026090111, 'zoom');
+    }
+
     return true;
 }

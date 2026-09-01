@@ -41,28 +41,15 @@ $PAGE->set_context($context);
 
 require_capability('mod/zoom:view', $context);
 
-// Only show recording that is visble and valid. Managers can follow the
-// link of a hidden recording too (the occurrences table lists them for
-// review) — hiding gates students, not the people doing the hiding. Note
-// that hiding also unshares the set on Zoom, so the link itself only opens
-// for Zoom account admins until it is shown again.
+// Only show recording that is visble and valid.
 $params = [
     'id' => $recordingid,
+    'showrecording' => 1,
     'zoomid' => $zoom->id,
 ];
-if (!has_capability('mod/zoom:addinstance', $context)) {
-    $params['showrecording'] = 1;
-}
 $rec = $DB->get_record('zoom_meeting_recordings', $params);
 if (empty($rec)) {
     throw new moodle_exception('recordingnotfound', 'mod_zoom');
-}
-
-// Pooled-hosts feature: past the retention window the recording is in the
-// Zoom trash — the row stays listed but the link is gone; direct URL access
-// gets the same message.
-if (!empty($rec->timepurged)) {
-    throw new moodle_exception('recording_expired_long', 'mod_zoom');
 }
 
 $params = ['recordingsid' => $rec->id, 'userid' => $USER->id];
@@ -85,10 +72,6 @@ if (!empty($view)) {
     $view->id = $DB->insert_record('zoom_meeting_recordings_view', $view);
 }
 
-// Pooled-hosts feature: pre-answer Zoom's passcode gate with the URL-safe
-// play token so viewers land straight in the player. The token only covers
-// the passcode leg — share/auth gates still apply on Zoom's side.
-$params = empty($rec->playpasscode) ? [] : ['pwd' => $rec->playpasscode];
-$nexturl = new moodle_url($rec->externalurl, $params);
+$nexturl = new moodle_url($rec->externalurl);
 
 redirect($nexturl);

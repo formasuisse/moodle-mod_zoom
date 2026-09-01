@@ -1731,62 +1731,11 @@ class webservice {
         return $response;
     }
 
-    /**
-     * Share or unshare a meeting's recording set.
-     *
-     * Pooled-hosts feature. Zoom creates every recording set unshared
-     * (share_recording "none"), which only the host and account admins can
-     * open, so a student following the play link gets a permission error
-     * until the set is shared. Moodle's per-recording visibility toggle is
-     * what decides who may watch, so it drives this flag.
-     *
-     * Sharing stays gated: the account keeps
-     * required_password_for_shared_cloud_recordings on and the passcode out
-     * of the shareable link, so only a link carrying the play token opens
-     * the recording. Neither the sign-in wall (recording_authentication) nor
-     * the download button (viewer_download) is touched.
-     *
-     * @param string $meetinguuid The UUID of a meeting with recordings.
-     * @param bool $shared Whether a viewer holding the link may watch.
-     * @return void
-     */
-    public function set_recording_sharing($meetinguuid, $shared) {
-        // Granular: cloud_recording:update:recording_settings:admin.
-        $url = 'meetings/' . $this->encode_uuid($meetinguuid) . '/recordings/settings';
-        $this->make_call($url, ['share_recording' => $shared ? 'publicly' : 'none'], 'patch');
-    }
+    
 
-    /**
-     * Get a meeting's full recordings response: per-file URLs, the passcode
-     * and its URL-safe play token (recording_play_passcode).
-     *
-     * Pooled-hosts feature. Zoom re-mints every link field on each call (old
-     * mints stay valid), so the play token must be paired with URLs taken
-     * from the SAME response — callers should store this response's URLs,
-     * not the user-level listing's.
-     *
-     * @param string $meetinguuid The UUID of a meeting with recordings.
-     * @return stdClass The meeting's recordings response.
-     */
-    public function get_meeting_recording_data($meetinguuid) {
-        // Granular: cloud_recording:read:list_recording_files:admin.
-        $url = 'meetings/' . $this->encode_uuid($meetinguuid) . '/recordings';
-        return $this->make_call($url);
-    }
+    
 
-    /**
-     * Move all of a meeting's recordings to the Zoom trash (recoverable for
-     * 30 days in the portal).
-     *
-     * Pooled-hosts feature: retention enforcement (recordingretentiondays).
-     *
-     * @param string $meetinguuid The UUID of a meeting with recordings.
-     * @return void
-     */
-    public function delete_meeting_recordings($meetinguuid) {
-        $url = 'meetings/' . $this->encode_uuid($meetinguuid) . '/recordings?action=trash';
-        $this->make_call($url, null, 'delete');
-    }
+    
 
     /**
      * Returns whether or not the current user is permitted to create a meeting/webinar that requires registration.

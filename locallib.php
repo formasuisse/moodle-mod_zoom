@@ -1320,54 +1320,6 @@ function zoom_get_meeting_recordings_grouped($zoomid = null) {
 }
 
 /**
- * Make Zoom's sharing flag for a recording set match Moodle's visibility.
- *
- * Zoom creates every cloud recording set unshared (share_recording "none"),
- * which only the host and account admins can open, so a student following
- * the play link gets a permission error until the set is shared. Sharing is
- * per recording SET (per meetinguuid) while Moodle stores visibility per
- * row, so the set is shared as soon as one of its rows is visible and
- * unshared once the last one is hidden. Hiding therefore revokes a link a
- * student already holds, instead of only dropping it from the list.
- *
- * Purged rows are ignored: retention has already moved those recordings to
- * the Zoom trash, so there is nothing left to share, and a set with no rows
- * still on Zoom is left alone rather than patched into a 404.
- *
- * Moodle's per-row visibility stays finer than this and stays independent:
- * hiding the transcript while keeping the video is a list-level decision,
- * and Zoom has no per-file permission to mirror it onto. Sharing only goes
- * off once nothing of the set is listed to students any more.
- *
- * @param string $meetinguuid The UUID of a meeting with recordings.
- * @param \mod_zoom\webservice|null $service The service to call, for testing.
- * @return bool Whether Zoom now matches Moodle.
- */
-function zoom_recording_sharing_sync($meetinguuid, $service = null) {
-    global $DB;
-
-    $params = ['meetinguuid' => $meetinguuid];
-    $onzoom = 'meetinguuid = :meetinguuid AND (timepurged IS NULL OR timepurged = 0)';
-
-    if (!$DB->record_exists_select('zoom_meeting_recordings', $onzoom, $params)) {
-        // Nothing of this set is left on Zoom.
-        return true;
-    }
-
-    $shared = $DB->record_exists_select('zoom_meeting_recordings', $onzoom . ' AND showrecording = 1', $params);
-
-    try {
-        $service = $service ?? zoom_webservice();
-        $service->set_recording_sharing($meetinguuid, $shared);
-    } catch (moodle_exception $error) {
-        debugging('Could not set Zoom sharing for recording set ' . $meetinguuid . ': ' . $error->getMessage());
-        return false;
-    }
-
-    return true;
-}
-
-/**
  * Singleton for Zoom webservice class.
  *
  * @return \mod_zoom\webservice
@@ -1822,22 +1774,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
         return null;
     }
 
-    // Video recordings grouped by local calendar day of the recording start.
-    $recordingsbyday = [];
-    if (get_config('zoom', 'viewrecordings')) {
-        foreach ($DB->get_records('zoom_meeting_recordings', ['zoomid' => $zoom->id], 'recordingstart ASC') as $recording) {
-            if (!in_array($recording->recordingtype, ZOOM_POOLED_VIDEO_RECORDING_TYPES, true)) {
-                continue;
-            }
-
-            if (!$iszoommanager && intval($recording->showrecording) !== 1) {
-                continue;
-            }
-
-            $recordingsbyday[userdate($recording->recordingstart, '%Y%m%d')][] = $recording;
-        }
-    }
-
     $canedit = $iszoommanager && !empty($zoom->recurring) && $zoom->exists_on_zoom == ZOOM_MEETING_EXISTS;
 
     $occurrenceurl = function (array $params) use ($cm) {
@@ -1858,38 +1794,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
         $durationseconds = (int) ($row->duration ?: $zoom->duration);
         $formid = 'zoom-occ-move-' . $row->occurrenceid;
 
-        $recordings = [];
-        if (!$cancelled) {
-            $dayrecordings = array_values($recordingsbyday[userdate($row->starttime, '%Y%m%d')] ?? []);
-            foreach ($dayrecordings as $i => $recording) {
-                $label = get_string('occ_recording', 'mod_zoom');
-                // Several recordings on one session (stop/restart segments,
-                // multiple video views): the start time is what tells them
-                // apart — the name is just the meeting topic, identical on
-                // all of them.
-                if (count($dayrecordings) > 1) {
-                    $label .= ' ' . userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'));
-                }
-
-                $hidden = intval($recording->showrecording) !== 1;
-                $recordings[] = [
-                    'url' => (new moodle_url('/mod/zoom/loadrecording.php', [
-                        'id' => $cm->id, 'recordingid' => $recording->id,
-                    ]))->out(false),
-                    'label' => $label,
-                    'title' => get_string('occ_recording_started', 'mod_zoom',
-                        userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'))),
-                    'hidden' => $hidden,
-                    'first' => $i === 0,
-                    // Per-recording visibility toggle, right in the table.
-                    'toggleurl' => $iszoommanager ? $occurrenceurl([
-                        'action' => 'recshow', 'recording' => $recording->id,
-                        'show' => $hidden ? 1 : 0, 'sesskey' => sesskey(),
-                    ]) : null,
-                ];
-            }
-        }
-
         $occurrences[] = [
             'datetext' => userdate($row->starttime, get_string('strftimedaydate', 'langconfig')),
             'timetext' => userdate($row->starttime, get_string('strftimetime24', 'langconfig')),
@@ -1902,7 +1806,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
             'formid' => $formid,
             'occurrenceid' => $row->occurrenceid,
             'slot' => $editable ? zoom_pooled_slot_context((int) $row->starttime, $formid, true) : null,
-            'recordings' => $recordings,
             'cancelurl' => $editable ? $occurrenceurl(['action' => 'cancel', 'occurrence' => $row->occurrenceid]) : null,
             'discardurl' => $editable ? $occurrenceurl(['action' => 'discard', 'occurrence' => $row->occurrenceid]) : null,
             // Cancellation artifact cleanup: hide it from the list.
@@ -1915,7 +1818,6 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
     $context = [
         'ismanager' => $iszoommanager,
         'canedit' => $canedit,
-        'showrecordings' => !empty($recordingsbyday) || $iszoommanager,
         'cmid' => $cm->id,
         'sesskey' => sesskey(),
         'actionurl' => (new moodle_url('/mod/zoom/occurrence.php'))->out(false),

@@ -116,7 +116,6 @@
                 <th scope="col">{{#str}} occ_time, mod_zoom {{/str}}</th>
                 <th scope="col">{{#str}} occ_duration, mod_zoom {{/str}}</th>
                 <th scope="col">{{#str}} occ_status, mod_zoom {{/str}}</th>
-                {{#showrecordings}}<th scope="col">{{#str}} recordings, mod_zoom {{/str}}</th>{{/showrecordings}}
                 {{#ismanager}}<th scope="col"></th>{{/ismanager}}
             </tr>
         </thead>
@@ -151,17 +150,6 @@
                     {{#past}}<span class="badge badge-light">{{#str}} occ_past, mod_zoom {{/str}}</span>{{/past}}
                     {{#upcoming}}<span class="badge badge-info">{{#str}} occ_upcoming, mod_zoom {{/str}}</span>{{/upcoming}}
                 </td>
-                {{#showrecordings}}
-                <td>
-                    {{#recordings}}
-                        {{^first}}<span class="text-muted">·</span>{{/first}}
-                        <a href="{{url}}" target="_blank" {{#hidden}}class="text-muted"{{/hidden}} title="{{title}}">{{label}}</a>
-                        {{#toggleurl}}
-                            <span class="small">(<a href="{{toggleurl}}">{{#hidden}}{{#str}} occ_rec_show, mod_zoom {{/str}}{{/hidden}}{{^hidden}}{{#str}} occ_rec_hide, mod_zoom {{/str}}{{/hidden}}</a>)</span>
-                        {{/toggleurl}}
-                    {{/recordings}}
-                </td>
-                {{/showrecordings}}
                 {{#ismanager}}
                 <td>
                     <div class="text-nowrap">
