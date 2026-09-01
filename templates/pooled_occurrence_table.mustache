@@ -155,7 +155,7 @@
                 <td>
                     {{#recordings}}
                         {{^first}}<span class="text-muted">·</span>{{/first}}
-                        <a href="{{url}}" target="_blank" {{#hidden}}class="text-muted"{{/hidden}} title="{{title}}">{{label}}</a>
+                        <a href="{{url}}" class="zoom-rec-embed{{#hidden}} text-muted{{/hidden}}" data-embed-src="{{url}}" data-embed-title="{{label}}" title="{{title}}">{{label}}</a>
                         {{#toggleurl}}
                             <span class="small">(<a href="{{toggleurl}}">{{#hidden}}{{#str}} occ_rec_show, mod_zoom {{/str}}{{/hidden}}{{^hidden}}{{#str}} occ_rec_hide, mod_zoom {{/str}}{{/hidden}}</a>)</span>
                         {{/toggleurl}}
@@ -210,3 +210,46 @@
     </details>
     {{/addform}}
 </div>
+
+
+{{#js}}
+(function() {
+    // PROTOTYPE (#1218): open recordings in a fullscreen modal iframe instead of a
+    // top-level tab, so the student never leaves Moodle and no passcode page shows.
+    if (window.__zoomRecEmbedInit) { return; }
+    window.__zoomRecEmbedInit = true;
+    document.addEventListener('click', function(e) {
+        var a = e.target.closest('a.zoom-rec-embed');
+        if (!a) { return; }
+        e.preventDefault();
+        var src = a.getAttribute('data-embed-src');
+        var title = a.getAttribute('data-embed-title') || '';
+        var ov = document.createElement('div');
+        ov.style.cssText = 'position:fixed;inset:0;z-index:10500;background:rgba(0,0,0,.85);display:flex;flex-direction:column;';
+        var bar = document.createElement('div');
+        bar.style.cssText = 'flex:0 0 auto;display:flex;justify-content:space-between;align-items:center;padding:.5rem 1rem;color:#fff;font:600 15px system-ui,sans-serif;';
+        bar.innerHTML = '<span></span>';
+        bar.firstChild.textContent = title;
+        var close = document.createElement('button');
+        close.type = 'button';
+        close.textContent = '\u2715';
+        close.setAttribute('aria-label', 'Close');
+        close.style.cssText = 'background:none;border:0;color:#fff;font-size:24px;cursor:pointer;line-height:1;';
+        bar.appendChild(close);
+        var frame = document.createElement('iframe');
+        frame.src = src;
+        frame.setAttribute('allow', 'autoplay; fullscreen; clipboard-write');
+        frame.setAttribute('allowfullscreen', 'true');
+        frame.setAttribute('referrerpolicy', 'no-referrer');
+        frame.style.cssText = 'flex:1 1 auto;width:100%;border:0;background:#000;';
+        ov.appendChild(bar);
+        ov.appendChild(frame);
+        function shut() { ov.remove(); document.removeEventListener('keydown', onKey); }
+        function onKey(ev) { if (ev.key === 'Escape') { shut(); } }
+        close.addEventListener('click', shut);
+        ov.addEventListener('click', function(ev) { if (ev.target === ov) { shut(); } });
+        document.addEventListener('keydown', onKey);
+        document.body.appendChild(ov);
+    });
+})();
+{{/js}}
