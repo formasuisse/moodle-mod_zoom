@@ -74,7 +74,7 @@ class get_meeting_recordings extends scheduled_task {
             ],
             'granular' => [
                 'cloud_recording:read:list_user_recordings:admin',
-                'cloud_recording:read:list_recording_files:admin',
+                'cloud_recording:read:recording_settings:admin',
             ],
         ];
 
@@ -116,8 +116,7 @@ class get_meeting_recordings extends scheduled_task {
             return;
         }
 
-        $meetingdata = [];
-        $touchedsets = [];
+        $meetingpasscodes = [];
         $localrecordings = zoom_get_meeting_recordings_grouped();
 
         foreach ($hostmeetings as $hostid => $meetings) {
@@ -145,24 +144,11 @@ class get_meeting_recordings extends scheduled_task {
                     continue;
                 }
 
-                // Pooled-hosts feature: fetch the meeting's own recordings
-                // response once per meeting. It carries the passcode, the
-                // URL-safe play token and per-file URLs — token and URL must
-                // come from the SAME response (Zoom re-mints all link fields
-                // on every call).
-                if (empty($meetingdata[$recording->meetinguuid])) {
+                // As of 2023-09-24, 'password' is not present in the user recordings API response.
+                if (empty($meetingpasscodes[$recording->meetinguuid])) {
                     try {
-                        $data = $service->get_meeting_recording_data($recording->meetinguuid);
-                        $files = [];
-                        foreach ($data->recording_files ?? [] as $file) {
-                            $files[$file->id] = $file;
-                        }
-
-                        $meetingdata[$recording->meetinguuid] = (object) [
-                            'password' => $data->password ?? '',
-                            'playpasscode' => $data->recording_play_passcode ?? '',
-                            'files' => $files,
-                        ];
+                        $settings = $service->get_recording_settings($recording->meetinguuid);
+                        $meetingpasscodes[$recording->meetinguuid] = $settings->password;
                     } catch (moodle_exception $error) {
                         continue;
                     }
@@ -176,11 +162,8 @@ class get_meeting_recordings extends scheduled_task {
                 $record->meetinguuid = $recording->meetinguuid;
                 $record->zoomrecordingid = $recordingid;
                 $record->name = $zoom->name;
-                $meetinginfo = $meetingdata[$recording->meetinguuid];
-                $samecallfile = $meetinginfo->files[$recordingid] ?? null;
-                $record->externalurl = $samecallfile->play_url ?? $recording->url;
-                $record->passcode = $meetinginfo->password;
-                $record->playpasscode = $meetinginfo->playpasscode;
+                $record->externalurl = $recording->url;
+                $record->passcode = $meetingpasscodes[$recording->meetinguuid];
                 $record->recordingtype = $recordingtype;
                 $record->recordingstart = $recording->recordingstart;
                 $record->showrecording = $zoom->recordings_visible_default;
@@ -188,18 +171,7 @@ class get_meeting_recordings extends scheduled_task {
                 $record->timemodified = $now;
 
                 $record->id = $DB->insert_record('zoom_meeting_recordings', $record);
-                $touchedsets[$recording->meetinguuid] = true;
                 mtrace('Recording id: ' . $recordingid . ' (' . $recordingtype . ') added to the database');
-            }
-        }
-
-        // New rows land at recordings_visible_default, which defaults to
-        // visible — and a recording set Zoom created stays unshared until it
-        // is told otherwise, so the common path (nobody touches the toggle)
-        // needs this to be watchable at all.
-        foreach (array_keys($touchedsets) as $meetinguuid) {
-            if (!zoom_recording_sharing_sync($meetinguuid, $service)) {
-                mtrace('Could not update Zoom sharing for recording set: ' . $meetinguuid);
             }
         }
     }
