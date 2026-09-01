@@ -185,7 +185,11 @@ class get_meeting_recordings extends scheduled_task {
                 $record->sharurl = $meetinginfo->sharurl;
                 $record->recordingtype = $recordingtype;
                 $record->recordingstart = $recording->recordingstart;
-                $record->showrecording = $zoom->recordings_visible_default;
+                // Mask by default, enforced fork-side (infra #1234): every newly
+                // synced recording lands hidden regardless of the activity's
+                // recordings_visible_default, and is revealed only via the
+                // per-recording toggle.
+                $record->showrecording = 0;
                 $record->timecreated = $now;
                 $record->timemodified = $now;
 
