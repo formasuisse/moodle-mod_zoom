@@ -903,7 +903,9 @@ class mod_zoom_mod_form extends moodleform_mod {
                 get_string('recordingvisibility', 'mod_zoom'),
                 get_string('yes')
             );
-            $mform->setDefault('recordings_visible_default', 1);
+            // Mask new recordings by default (infra #1234): they stay hidden
+            // until a teacher reveals them via the per-recording toggle.
+            $mform->setDefault('recordings_visible_default', 0);
             $mform->addHelpButton('recordings_visible_default', 'recordingvisibility', 'mod_zoom');
 
             // Pooled-hosts feature: per-activity retention override. Empty
