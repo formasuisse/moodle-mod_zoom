@@ -1354,7 +1354,14 @@ function zoom_recording_sharing_sync($meetinguuid, $service = null) {
         return true;
     }
 
-    $shared = $DB->record_exists_select('zoom_meeting_recordings', $onzoom . ' AND showrecording = 1', $params);
+    // Only ever open up, never restrict down (infra #1234). Sharing is a per-set
+    // global flag on Zoom, and a recording may be referenced from more than one
+    // Moodle surface (another activity, a page link). Moodle masking / group
+    // gating hides the link from students but must NOT unshare the set, or it
+    // would revoke every other reference too. So the set is shared as soon as it
+    // exists on Zoom and stays shared until retention purges it; visibility and
+    // gating are enforced Moodle-side, not by toggling Zoom's flag.
+    $shared = true;
 
     try {
         $service = $service ?? zoom_webservice();

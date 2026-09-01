@@ -109,11 +109,14 @@ final class recording_sharing_test extends advanced_testcase {
         $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
-    public function test_hidden_recording_is_unshared(): void {
+    public function test_hidden_recording_stays_shared(): void {
+        // Only-open-up (infra #1234): visibility no longer drives Zoom sharing.
+        // A masked/hidden row still exists on Zoom, so the set stays shared;
+        // the mask is enforced Moodle-side, not by unsharing.
         $this->recording('uuid-a', 0, 'rec-1');
 
         $this->assertTrue(zoom_recording_sharing_sync('uuid-a', $this->mockservice()));
-        $this->assertSame([['uuid-a', false]], $this->calls);
+        $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
     public function test_one_visible_row_shares_the_whole_set(): void {
@@ -139,32 +142,35 @@ final class recording_sharing_test extends advanced_testcase {
         $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
-    public function test_hiding_every_row_unshares(): void {
-        // Only when nothing of the set is listed any more does sharing go off.
+    public function test_hiding_every_row_stays_shared(): void {
+        // Only-open-up (infra #1234): even with every row masked, the set exists
+        // on Zoom and stays shared. Masking hides the link Moodle-side and must
+        // not unshare, or it would revoke references from other surfaces.
         $this->recording('uuid-a', 0, 'rec-video', null, 'active_speaker');
         $this->recording('uuid-a', 0, 'rec-audio', null, 'audio_only');
 
         zoom_recording_sharing_sync('uuid-a', $this->mockservice());
-        $this->assertSame([['uuid-a', false]], $this->calls);
+        $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
-    public function test_other_sets_do_not_leak_in(): void {
-        // A visible row on a different meeting must not keep this set shared.
+    public function test_only_the_named_set_is_shared(): void {
+        // The sync only ever touches the set it is called for, and shares it
+        // because it exists (a row on another meeting is irrelevant either way).
         $this->recording('uuid-a', 0, 'rec-1');
         $this->recording('uuid-b', 1, 'rec-2');
 
         zoom_recording_sharing_sync('uuid-a', $this->mockservice());
-        $this->assertSame([['uuid-a', false]], $this->calls);
+        $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
-    public function test_purged_rows_never_count_as_visible(): void {
-        // Retention moved this one to the Zoom trash; a stale showrecording
-        // flag must not ask Zoom to share a recording that is gone.
+    public function test_a_live_row_keeps_the_set_shared(): void {
+        // A purged row is ignored, but a live (non-purged) row keeps the set
+        // shared regardless of its visibility flag: only-open-up.
         $this->recording('uuid-a', 1, 'rec-purged', 1234);
         $this->recording('uuid-a', 0, 'rec-live');
 
         zoom_recording_sharing_sync('uuid-a', $this->mockservice());
-        $this->assertSame([['uuid-a', false]], $this->calls);
+        $this->assertSame([['uuid-a', true]], $this->calls);
     }
 
     public function test_fully_purged_set_is_not_called(): void {
