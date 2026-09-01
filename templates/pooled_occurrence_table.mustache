@@ -155,7 +155,7 @@
                 <td>
                     {{#recordings}}
                         <div class="zoom-rec mb-1">
-                            <a href="{{url}}" class="zoom-rec-embed{{#hidden}} text-muted{{/hidden}}" {{#embedsrc}}data-embed-src="{{embedsrc}}" data-log-url="{{logurl}}"{{/embedsrc}}{{^embedsrc}}data-embed-src="{{url}}"{{/embedsrc}} data-embed-title="{{label}}" title="{{title}}">{{label}}</a>
+                            <a href="{{url}}" class="zoom-rec-embed{{#hidden}} text-muted{{/hidden}}" data-embed-src="{{url}}" data-embed-title="{{label}}" title="{{title}}">{{label}}</a>
                             {{#ismanager}}
                                 {{#hidden}}<span class="badge badge-secondary ms-1">{{#str}} occ_rec_masked, mod_zoom {{/str}}</span>{{/hidden}}
                                 <form method="post" action="{{actionurl}}" class="d-inline-flex align-items-center ms-2 zoom-rec-groups">
@@ -255,8 +255,6 @@
         frame.style.cssText = 'flex:1 1 auto;width:100%;border:0;background:#000;';
         ov.appendChild(bar);
         ov.appendChild(frame);
-        var logUrl = a.getAttribute('data-log-url');
-        if (logUrl) { try { fetch(logUrl, {method: 'POST', credentials: 'same-origin', keepalive: true}); } catch (err) {} }
         function shut() { ov.remove(); document.removeEventListener('keydown', onKey); }
         function onKey(ev) { if (ev.key === 'Escape') { shut(); } }
         close.addEventListener('click', shut);

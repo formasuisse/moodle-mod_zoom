@@ -1963,18 +1963,11 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
                     }
                 }
                 $recordings[] = [
-                    // Interim embedded player (infra #1233): embedsrc is the Zoom
-                    // share URL, embedded directly in a modal iframe (framing skips
-                    // the passcode, no pwd, no top-level bearer link). logurl is the
-                    // log-only tracking beacon. url (loadrecording redirect) is kept
-                    // only as a fallback for rows not yet re-synced with a share URL.
-                    'embedsrc' => !empty($recording->sharurl)
-                        ? (new moodle_url($recording->sharurl, empty($recording->playpasscode)
-                            ? [] : ['pwd' => $recording->playpasscode]))->out(false)
-                        : null,
-                    'logurl' => (new moodle_url('/mod/zoom/trackrecording.php', [
-                        'id' => $cm->id, 'recordingid' => $recording->id, 'sesskey' => sesskey(),
-                    ]))->out(false),
+                    // The modal opens this gated Moodle URL in an iframe; it
+                    // redirects to Zoom inside the frame (infra #1233/#1234). Keeping
+                    // a Moodle URL as the iframe src means copying it out of the DOM
+                    // yields a login+visibility-gated link, not a working Zoom bearer
+                    // link.
                     'url' => (new moodle_url('/mod/zoom/loadrecording.php', [
                         'id' => $cm->id, 'recordingid' => $recording->id,
                     ]))->out(false),

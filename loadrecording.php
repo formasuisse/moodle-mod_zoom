@@ -82,7 +82,19 @@ if (!empty($view)) {
 // Pooled-hosts feature: pre-answer Zoom's passcode gate with the URL-safe
 // play token so viewers land straight in the player. The token only covers
 // the passcode leg — share/auth gates still apply on Zoom's side.
+\mod_zoom\event\recording_viewed::create([
+    'context' => $context,
+    'objectid' => $rec->id,
+    'other' => ['cmid' => (int) $cm->id],
+])->trigger();
+
+// The modal iframe points here (a gated Moodle URL), not at the Zoom link, so
+// copying the iframe src yields a URL that still needs a Moodle session and group
+// visibility. The redirect to Zoom happens inside the frame; the pwd play token
+// makes it play with no passcode prompt. (A determined viewer can still read the
+// Zoom URL from the network — the hard boundary is infra #1218.)
+$playurl = !empty($rec->sharurl) ? $rec->sharurl : $rec->externalurl;
 $params = empty($rec->playpasscode) ? [] : ['pwd' => $rec->playpasscode];
-$nexturl = new moodle_url($rec->externalurl, $params);
+$nexturl = new moodle_url($playurl, $params);
 
 redirect($nexturl);
