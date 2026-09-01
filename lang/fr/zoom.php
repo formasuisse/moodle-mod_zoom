@@ -31,6 +31,7 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['event_collision_imminent'] = 'Collision imminente sur un hôte Zoom';
+$string['event_recording_viewed'] = 'Enregistrement consulté';
 $string['event_overrun_detected'] = 'Dépassement de séance Zoom détecté';
 $string['event_pool_exhausted'] = 'Pool d\'hôtes Zoom épuisé';
 $string['event_pool_misconfigured'] = 'Pool d\'hôtes Zoom mal configuré';

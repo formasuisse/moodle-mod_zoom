@@ -75,6 +75,7 @@ $string['calendariconalt'] = 'Calendar icon';
 $string['calendarjoinurl'] = 'Meeting join URL: {$a}.';
 $string['changehost'] = 'Change host';
 $string['clickjoin'] = 'Clicked join meeting button';
+$string['event_recording_viewed'] = 'Recording viewed';
 $string['clientid'] = 'Zoom client ID';
 $string['clientid_desc'] = '';
 $string['clientsecret'] = 'Zoom client secret';

@@ -161,6 +161,7 @@ class get_meeting_recordings extends scheduled_task {
                         $meetingdata[$recording->meetinguuid] = (object) [
                             'password' => $data->password ?? '',
                             'playpasscode' => $data->recording_play_passcode ?? '',
+                            'sharurl' => $data->share_url ?? '',
                             'files' => $files,
                         ];
                     } catch (moodle_exception $error) {
@@ -181,6 +182,7 @@ class get_meeting_recordings extends scheduled_task {
                 $record->externalurl = $samecallfile->play_url ?? $recording->url;
                 $record->passcode = $meetinginfo->password;
                 $record->playpasscode = $meetinginfo->playpasscode;
+                $record->sharurl = $meetinginfo->sharurl;
                 $record->recordingtype = $recordingtype;
                 $record->recordingstart = $recording->recordingstart;
                 $record->showrecording = $zoom->recordings_visible_default;

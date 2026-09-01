@@ -155,7 +155,7 @@
                 <td>
                     {{#recordings}}
                         {{^first}}<span class="text-muted">·</span>{{/first}}
-                        <a href="{{url}}" class="zoom-rec-embed{{#hidden}} text-muted{{/hidden}}" data-embed-src="{{url}}" data-embed-title="{{label}}" title="{{title}}">{{label}}</a>
+                        <a href="{{url}}" class="zoom-rec-embed{{#hidden}} text-muted{{/hidden}}" {{#embedsrc}}data-embed-src="{{embedsrc}}" data-log-url="{{logurl}}"{{/embedsrc}}{{^embedsrc}}data-embed-src="{{url}}"{{/embedsrc}} data-embed-title="{{label}}" title="{{title}}">{{label}}</a>
                         {{#toggleurl}}
                             <span class="small">(<a href="{{toggleurl}}">{{#hidden}}{{#str}} occ_rec_show, mod_zoom {{/str}}{{/hidden}}{{^hidden}}{{#str}} occ_rec_hide, mod_zoom {{/str}}{{/hidden}}</a>)</span>
                         {{/toggleurl}}
@@ -244,6 +244,8 @@
         frame.style.cssText = 'flex:1 1 auto;width:100%;border:0;background:#000;';
         ov.appendChild(bar);
         ov.appendChild(frame);
+        var logUrl = a.getAttribute('data-log-url');
+        if (logUrl) { try { fetch(logUrl, {method: 'POST', credentials: 'same-origin', keepalive: true}); } catch (err) {} }
         function shut() { ov.remove(); document.removeEventListener('keydown', onKey); }
         function onKey(ev) { if (ev.key === 'Escape') { shut(); } }
         close.addEventListener('click', shut);

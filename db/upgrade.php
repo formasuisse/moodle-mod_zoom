@@ -1095,5 +1095,17 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026081600, 'zoom');
     }
 
+    if ($oldversion < 2026090100) {
+        // Interim embedded player (infra #1233): store the per-set Zoom share URL
+        // so the recording can be embedded directly in a modal iframe.
+        $table = new xmldb_table('zoom_meeting_recordings');
+        $field = new xmldb_field('sharurl', XMLDB_TYPE_TEXT, null, null, null, null, null, 'playpasscode');
+        if (!$dbman->field_exists($table, $field)) {
+            $dbman->add_field($table, $field);
+        }
+
+        upgrade_mod_savepoint(true, 2026090100, 'zoom');
+    }
+
     return true;
 }
