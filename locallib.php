@@ -1375,6 +1375,67 @@ function zoom_recording_sharing_sync($meetinguuid, $service = null) {
 }
 
 /**
+ * The group ids a recording is unmasked to. Empty means masked (hidden).
+ *
+ * @param int $recordingid zoom_meeting_recordings.id
+ * @return int[] group ids; 0 means everyone
+ */
+function zoom_recording_assigned_groups($recordingid) {
+    global $DB;
+    return array_map('intval', $DB->get_fieldset_select(
+        'zoom_meeting_recordings_groups', 'groupid', 'recordingsid = ?', [$recordingid]));
+}
+
+/**
+ * Replace a recording's group assignment (its unmask set).
+ *
+ * @param int $recordingid zoom_meeting_recordings.id
+ * @param int[] $groupids group ids to unmask to; 0 means everyone; [] masks it
+ */
+function zoom_set_recording_groups($recordingid, array $groupids) {
+    global $DB;
+    $DB->delete_records('zoom_meeting_recordings_groups', ['recordingsid' => $recordingid]);
+    foreach (array_unique(array_map('intval', $groupids)) as $groupid) {
+        $DB->insert_record('zoom_meeting_recordings_groups',
+            (object) ['recordingsid' => $recordingid, 'groupid' => $groupid]);
+    }
+}
+
+/**
+ * Whether a recording is visible to a user.
+ *
+ * Masked by default (infra #1234): a recording is visible only once assigned to a
+ * group. Managers (mod/zoom:addinstance) always see everything; everyone else sees
+ * it if it is assigned to the "everyone" pseudo-group (0) or to a course group they
+ * belong to.
+ *
+ * @param int $recordingid zoom_meeting_recordings.id
+ * @param \context $context The activity context.
+ * @param int|null $userid Defaults to the current user.
+ * @return bool
+ */
+function zoom_recording_visible_to_user($recordingid, $context, $userid = null) {
+    global $USER;
+    $userid = $userid ?? $USER->id;
+
+    if (has_capability('mod/zoom:addinstance', $context, $userid)) {
+        return true;
+    }
+
+    $assigned = zoom_recording_assigned_groups($recordingid);
+    if (empty($assigned)) {
+        return false;
+    }
+    if (in_array(0, $assigned, true)) {
+        return true;
+    }
+
+    $courseid = $context->get_course_context()->instanceid;
+    $usergroups = array_keys(groups_get_all_groups($courseid, $userid, 0, 'g.id'));
+    return (bool) array_intersect($assigned, array_map('intval', $usergroups));
+}
+
+/**
  * Singleton for Zoom webservice class.
  *
  * @return \mod_zoom\webservice
@@ -1829,6 +1890,11 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
         return null;
     }
 
+    // Group gating (infra #1234): masked unless assigned to a group.
+    $modcontext = \context_module::instance($cm->id);
+    $courseid = $modcontext->get_course_context()->instanceid;
+    $coursegroups = $iszoommanager ? groups_get_all_groups($courseid, 0, 0, 'g.id, g.name') : [];
+
     // Video recordings grouped by local calendar day of the recording start.
     $recordingsbyday = [];
     if (get_config('zoom', 'viewrecordings')) {
@@ -1837,7 +1903,7 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
                 continue;
             }
 
-            if (!$iszoommanager && intval($recording->showrecording) !== 1) {
+            if (!zoom_recording_visible_to_user($recording->id, $modcontext)) {
                 continue;
             }
 
@@ -1878,7 +1944,24 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
                     $label .= ' ' . userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'));
                 }
 
-                $hidden = intval($recording->showrecording) !== 1;
+                // Group gating (infra #1234): masked unless assigned to a group.
+                $assigned = zoom_recording_assigned_groups($recording->id);
+                $masked = empty($assigned);
+                $groupoptions = null;
+                if ($iszoommanager) {
+                    $groupoptions = [[
+                        'id' => 0,
+                        'name' => get_string('occ_rec_everyone', 'mod_zoom'),
+                        'selected' => in_array(0, $assigned, true),
+                    ]];
+                    foreach ($coursegroups as $g) {
+                        $groupoptions[] = [
+                            'id' => (int) $g->id,
+                            'name' => format_string($g->name, true, ['context' => $modcontext]),
+                            'selected' => in_array((int) $g->id, $assigned, true),
+                        ];
+                    }
+                }
                 $recordings[] = [
                     // Interim embedded player (infra #1233): embedsrc is the Zoom
                     // share URL, embedded directly in a modal iframe (framing skips
@@ -1886,7 +1969,9 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
                     // log-only tracking beacon. url (loadrecording redirect) is kept
                     // only as a fallback for rows not yet re-synced with a share URL.
                     'embedsrc' => !empty($recording->sharurl)
-                        ? (new moodle_url($recording->sharurl))->out(false) : null,
+                        ? (new moodle_url($recording->sharurl, empty($recording->playpasscode)
+                            ? [] : ['pwd' => $recording->playpasscode]))->out(false)
+                        : null,
                     'logurl' => (new moodle_url('/mod/zoom/trackrecording.php', [
                         'id' => $cm->id, 'recordingid' => $recording->id, 'sesskey' => sesskey(),
                     ]))->out(false),
@@ -1896,13 +1981,13 @@ function zoom_pooled_occurrence_table_context($zoom, $cm, $iszoommanager) {
                     'label' => $label,
                     'title' => get_string('occ_recording_started', 'mod_zoom',
                         userdate($recording->recordingstart, get_string('strftimetime24', 'langconfig'))),
-                    'hidden' => $hidden,
+                    'hidden' => $masked,
                     'first' => $i === 0,
-                    // Per-recording visibility toggle, right in the table.
-                    'toggleurl' => $iszoommanager ? $occurrenceurl([
-                        'action' => 'recshow', 'recording' => $recording->id,
-                        'show' => $hidden ? 1 : 0, 'sesskey' => sesskey(),
-                    ]) : null,
+                    // Group gating control (managers): assign the recording to
+                    // groups to unmask it. No selection = masked. recordingid +
+                    // sesskey drive the recgroups form posted to occurrence.php.
+                    'recordingid' => $recording->id,
+                    'groupoptions' => $groupoptions,
                 ];
             }
         }

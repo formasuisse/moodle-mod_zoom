@@ -25,6 +25,9 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['accountid'] = 'Zoom account ID';
+$string['occ_rec_everyone'] = 'Everyone';
+$string['occ_rec_group_save'] = 'Save';
+$string['occ_rec_masked'] = 'Masked';
 $string['accountid_desc'] = '';
 $string['actions'] = 'Actions';
 $string['activitydate:ended'] = 'Ended: ';

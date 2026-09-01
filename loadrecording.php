@@ -46,15 +46,9 @@ require_capability('mod/zoom:view', $context);
 // review) — hiding gates students, not the people doing the hiding. Note
 // that hiding also unshares the set on Zoom, so the link itself only opens
 // for Zoom account admins until it is shown again.
-$params = [
-    'id' => $recordingid,
-    'zoomid' => $zoom->id,
-];
-if (!has_capability('mod/zoom:addinstance', $context)) {
-    $params['showrecording'] = 1;
-}
-$rec = $DB->get_record('zoom_meeting_recordings', $params);
-if (empty($rec)) {
+$rec = $DB->get_record('zoom_meeting_recordings',
+    ['id' => $recordingid, 'zoomid' => $zoom->id]);
+if (empty($rec) || !zoom_recording_visible_to_user($rec->id, $context)) {
     throw new moodle_exception('recordingnotfound', 'mod_zoom');
 }
 

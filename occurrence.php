@@ -55,8 +55,13 @@ require_capability('mod/zoom:addinstance', $context);
 $zoom = $DB->get_record('zoom', ['id' => $cm->instance], '*', MUST_EXIST);
 $viewurl = new moodle_url('/mod/zoom/view.php', ['id' => $cm->id]);
 
-if (zoom_pooled_group() === null || !empty($zoom->webinar) || empty($zoom->recurring)
-        || $zoom->exists_on_zoom != ZOOM_MEETING_EXISTS) {
+// Recording visibility (recgroups) is a Moodle-side operation and must work even
+// when the meeting is gone from Zoom or the pool is unconfigured — masking and
+// group gating never touch Zoom (infra #1234). The Zoom-mutating actions still
+// require a live pooled recurring meeting.
+if ($action !== 'recgroups'
+        && (zoom_pooled_group() === null || !empty($zoom->webinar) || empty($zoom->recurring)
+            || $zoom->exists_on_zoom != ZOOM_MEETING_EXISTS)) {
     redirect($viewurl);
 }
 
@@ -208,6 +213,18 @@ try {
                     \core\output\notification::NOTIFY_WARNING);
             }
 
+            redirect($viewurl);
+
+        case 'recgroups':
+            // Group gating (infra #1234): set which groups a recording is
+            // unmasked to. No selection masks it. Moodle-side only; Zoom sharing
+            // is left open (see zoom_recording_sharing_sync).
+            require_sesskey();
+            $recordingid = required_param('recording', PARAM_INT);
+            $groupids = optional_param_array('groups', [], PARAM_INT);
+            $DB->get_record('zoom_meeting_recordings',
+                ['id' => $recordingid, 'zoomid' => $zoom->id], 'id', MUST_EXIST);
+            zoom_set_recording_groups($recordingid, $groupids);
             redirect($viewurl);
 
         case 'cancel':

@@ -215,5 +215,19 @@
         <KEY NAME="fk_zoomeventid" TYPE="foreign-unique" FIELDS="zoomeventid" REFTABLE="event" REFFIELDS="id"/>
       </KEYS>
     </TABLE>
+    <TABLE NAME="zoom_meeting_recordings_groups" COMMENT="Which Moodle groups a recording is unmasked to. No rows = masked (hidden). groupid 0 = everyone.">
+      <FIELDS>
+        <FIELD NAME="id" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="true"/>
+        <FIELD NAME="recordingsid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="link to zoom_meeting_recordings"/>
+        <FIELD NAME="groupid" TYPE="int" LENGTH="10" NOTNULL="true" SEQUENCE="false" COMMENT="Course group id the recording is unmasked to; 0 means everyone enrolled."/>
+      </FIELDS>
+      <KEYS>
+        <KEY NAME="id_primary" TYPE="primary" FIELDS="id"/>
+        <KEY NAME="recordingsid_foreign" TYPE="foreign" FIELDS="recordingsid" REFTABLE="zoom_meeting_recordings" REFFIELDS="id"/>
+      </KEYS>
+      <INDEXES>
+        <INDEX NAME="recordingsid_groupid_idx" UNIQUE="true" FIELDS="recordingsid, groupid"/>
+      </INDEXES>
+    </TABLE>
   </TABLES>
 </XMLDB>

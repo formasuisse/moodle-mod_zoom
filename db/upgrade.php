@@ -1107,5 +1107,22 @@ function xmldb_zoom_upgrade($oldversion) {
         upgrade_mod_savepoint(true, 2026090100, 'zoom');
     }
 
+    if ($oldversion < 2026090101) {
+        // Group gating (infra #1234): a recording is masked unless assigned to a
+        // group. No rows = hidden; groupid 0 = everyone.
+        $table = new xmldb_table('zoom_meeting_recordings_groups');
+        $table->add_field('id', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, XMLDB_SEQUENCE, null);
+        $table->add_field('recordingsid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_field('groupid', XMLDB_TYPE_INTEGER, '10', null, XMLDB_NOTNULL, null, null);
+        $table->add_key('primary', XMLDB_KEY_PRIMARY, ['id']);
+        $table->add_key('recordingsid_foreign', XMLDB_KEY_FOREIGN, ['recordingsid'], 'zoom_meeting_recordings', ['id']);
+        $table->add_index('recordingsid_groupid_idx', XMLDB_INDEX_UNIQUE, ['recordingsid', 'groupid']);
+        if (!$dbman->table_exists($table)) {
+            $dbman->create_table($table);
+        }
+
+        upgrade_mod_savepoint(true, 2026090101, 'zoom');
+    }
+
     return true;
 }

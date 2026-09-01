@@ -42,14 +42,11 @@ require_sesskey();
 $context = context_module::instance($cm->id);
 require_capability('mod/zoom:view', $context);
 
-$params = [
-    'id' => $recordingid,
-    'zoomid' => $zoom->id,
-];
-if (!has_capability('mod/zoom:addinstance', $context)) {
-    $params['showrecording'] = 1;
+$rec = $DB->get_record('zoom_meeting_recordings',
+    ['id' => $recordingid, 'zoomid' => $zoom->id], '*', MUST_EXIST);
+if (!zoom_recording_visible_to_user($rec->id, $context)) {
+    throw new moodle_exception('recordingnotfound', 'mod_zoom');
 }
-$rec = $DB->get_record('zoom_meeting_recordings', $params, '*', MUST_EXIST);
 
 $now = time();
 $viewparams = ['recordingsid' => $rec->id, 'userid' => $USER->id];

@@ -31,6 +31,9 @@
 defined('MOODLE_INTERNAL') || die();
 
 $string['event_collision_imminent'] = 'Collision imminente sur un hôte Zoom';
+$string['occ_rec_everyone'] = 'Tout le monde';
+$string['occ_rec_group_save'] = 'Enregistrer';
+$string['occ_rec_masked'] = 'Masqué';
 $string['event_recording_viewed'] = 'Enregistrement consulté';
 $string['event_overrun_detected'] = 'Dépassement de séance Zoom détecté';
 $string['event_pool_exhausted'] = 'Pool d\'hôtes Zoom épuisé';
